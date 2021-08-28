@@ -79,7 +79,7 @@ func (q *Limiter) Check(from Identity) bool {
 		extwindow := q.Ruleset.Window + q.known[src]
 		q.mu.Unlock()
 		if err := q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second); err != nil {
-			println("Rate5: "+err.Error())
+			println("Rate5: " + err.Error())
 		}
 		q.debugPrint("ratelimit (strictly limited): ", count, " ", src)
 		return true
