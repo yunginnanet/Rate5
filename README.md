@@ -1,16 +1,24 @@
 # Rate5  
 [![GoDoc](https://godoc.org/github.com/yunginnanet/?status.svg)](https://godoc.org/github.com/yunginnanet/Rate5) [![Go Report Card](https://goreportcard.com/badge/github.com/yunginnanet/Rate5)](https://goreportcard.com/report/github.com/yunginnanet/Rate5)
   
-A generic ratelimitter for any golang project.    
+A generic ratelimitter for any golang project.  
+See [the docs](https://godoc.org/github.com/yunginnanet/Rate5) and the [examples](_example/rated.go) below for more details.
+  
+  
 
-## Short Example Implementation
-```  
+## Short Example
+```   
+import rate5 "github.com/yunginnanet/rate5"    
+
+var Rater *rate5.Limiter   
+
+[...]  
 type Client struct {
         ID   string
         Conn net.Conn
 
         loggedin  bool
-}
+}  
 
 // Rate5 doesn't care where you derive the string used for ratelimiting
 func (c Client) UniqueKey() string {
@@ -22,21 +30,21 @@ func (c Client) UniqueKey() string {
 }
   
 func (s *Server) handleTCP(c *Client) {
-	defer func() {
-		c.Conn.Close()
-		println("closed: " + c.Conn.RemoteAddr().String())
-	}()
-
 	// Returns true if ratelimited
 	if Rater.Check(c) {
-		c.Conn.Write([]byte("too many connections"))
+		c.Conn.Write([]byte("too many connections"))  
+		c.Conn.Close()
 		return
 	}
-    // handle connection ... 
-}
+[...]
     
 ```  
   
+## In-depth example
+  
+[Concurrent TCP Server with Rate5 Ratelimiter](_example/rated.go)  
+        
 ## To-Do  
-More documentation  
-Test cases
+More Documentation  
+More To-Dos  
+Test Cases  
