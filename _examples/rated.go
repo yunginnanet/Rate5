@@ -114,7 +114,7 @@ func (s *Server) handleTCP(c *Client) {
 		case "help":
 			c.send("history, whoami, logout")
 		case "whoami":
-			c.send(c.ID+"\n")
+			c.send(c.ID + "\n")
 		case "quit":
 			fallthrough
 		case "exit":

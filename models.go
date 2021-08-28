@@ -8,13 +8,13 @@ import (
 const (
 	// DefaultWindow is the standard window of time ratelimit triggers are observed in seconds
 	DefaultWindow = 25
-	// DefaultWindow is the standard amount of triggers observed within Window before ratelimiting occurs
+	// DefaultBurst is the standard amount of triggers observed within Window before ratelimiting occurs
 	DefaultBurst = 25
 )
 
 var debugChannel chan string
 
-/* any type implementing Identity only needs to have one unique key for the ratelimiter */
+// Identity is an interface that allows any arbitrary type to be used for a unique key in ratelimit checks when implemented */
 type Identity interface {
 	UniqueKey() string
 }
@@ -31,7 +31,7 @@ type Limiter struct {
 	Debug bool
 
 	known map[interface{}]int
-	mu *sync.Mutex
+	mu    *sync.Mutex
 }
 
 // Policy defines the mechanics of our ratelimiter

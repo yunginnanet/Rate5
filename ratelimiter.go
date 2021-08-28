@@ -22,7 +22,7 @@ func NewDefaultStrictLimiter() *Limiter {
 	return newLimiter(DefaultWindow, DefaultBurst, true)
 }
 
-// NewLimiter returns a custom limiter with Strict mode
+// NewStrictLimiter returns a custom limiter with Strict mode
 func NewStrictLimiter(window int, burst int) *Limiter {
 	return newLimiter(window, burst, true)
 }
@@ -59,7 +59,9 @@ func (q *Limiter) Check(from Identity) bool {
 	src := from.UniqueKey()
 	if count, err = q.Patrons.IncrementInt(src, 1); err != nil {
 		q.debugPrint("ratelimit (new): ", src)
-		q.Patrons.Add(src, 1, time.Duration(q.Ruleset.Window)*time.Second)
+		if err := q.Patrons.Add(src, 1, time.Duration(q.Ruleset.Window)*time.Second); err != nil {
+			println("Rate5: " + err.Error())
+		}
 		return false
 	}
 
@@ -76,7 +78,9 @@ func (q *Limiter) Check(from Identity) bool {
 		q.known[src]++
 		extwindow := q.Ruleset.Window + q.known[src]
 		q.mu.Unlock()
-		q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second)
+		if err := q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second); err != nil {
+			println("Rate5: "+err.Error())
+		}
 		q.debugPrint("ratelimit (strictly limited): ", count, " ", src)
 		return true
 	}
