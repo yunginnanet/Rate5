@@ -2,14 +2,14 @@ package ratelimit
 
 import (
 	cache "github.com/patrickmn/go-cache"
-	"time"
+	"sync"
 )
 
 const (
 	// DefaultWindow is the standard window of time ratelimit triggers are observed in seconds
-	DefaultWindow = 5
+	DefaultWindow = 25
 	// DefaultWindow is the standard amount of triggers observed within Window before ratelimiting occurs
-	DefaultBurst = 10
+	DefaultBurst = 25
 )
 
 var debugChannel chan string
@@ -30,13 +30,14 @@ type Limiter struct {
 	   delivered through a channel. See: DebugChannel() */
 	Debug bool
 
-	known map[interface{}]time.Duration
+	known map[interface{}]int
+	mu *sync.Mutex
 }
 
 // Policy defines the mechanics of our ratelimiter
 type Policy struct {
-	// Window defines the duration in which we keep track of a ratelimit trigger
-	Window time.Duration
+	// Window defines the duration in seconds that we should keep track of ratelimit triggers
+	Window int
 	/* Burst is the amount of times that Check will not trigger a limit
 	   within the duration defined by Window */
 	Burst int

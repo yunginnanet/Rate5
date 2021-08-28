@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"fmt"
 	cache "github.com/patrickmn/go-cache"
+	"sync"
 	"time"
 )
 
@@ -11,30 +12,31 @@ func NewDefaultLimiter() *Limiter {
 	return newLimiter(DefaultWindow, DefaultBurst, false)
 }
 
-// NewDefaultStrictLimiter returns a ratelimiter with default settings with Strict mode
-func NewDefaultStrictLimiter() *Limiter {
-	return newLimiter(DefaultWindow, DefaultBurst, true)
-}
-
 // NewLimiter returns a custom limiter witout Strict mode
 func NewLimiter(window int, burst int) *Limiter {
 	return newLimiter(window, burst, false)
 }
 
+// NewDefaultStrictLimiter returns a ratelimiter with default settings with Strict mode
+func NewDefaultStrictLimiter() *Limiter {
+	return newLimiter(DefaultWindow, DefaultBurst, true)
+}
+
 // NewLimiter returns a custom limiter with Strict mode
 func NewStrictLimiter(window int, burst int) *Limiter {
-	return newLimiter(window, burst, false)
+	return newLimiter(window, burst, true)
 }
 
 func newLimiter(window int, burst int, strict bool) *Limiter {
 	q := new(Limiter)
 	q.Ruleset = Policy{
-		Window: time.Duration(window) * time.Second,
+		Window: window,
 		Burst:  burst,
-		Strict: true,
+		Strict: strict,
 	}
-	q.Patrons = cache.New(q.Ruleset.Window*time.Second, 5*time.Second)
-	q.known = make(map[interface{}]time.Duration)
+	q.Patrons = cache.New(time.Duration(q.Ruleset.Window)*time.Second, 5*time.Second)
+	q.known = make(map[interface{}]int)
+	q.mu = &sync.Mutex{}
 	return q
 }
 
@@ -57,7 +59,7 @@ func (q *Limiter) Check(from Identity) bool {
 	src := from.UniqueKey()
 	if count, err = q.Patrons.IncrementInt(src, 1); err != nil {
 		q.debugPrint("ratelimit (new): ", src)
-		q.Patrons.Add(src, 1, q.Ruleset.Window*time.Second)
+		q.Patrons.Add(src, 1, time.Duration(q.Ruleset.Window)*time.Second)
 		return false
 	}
 
@@ -66,12 +68,15 @@ func (q *Limiter) Check(from Identity) bool {
 			q.debugPrint("ratelimit (limited): ", count, " ", src)
 			return true
 		}
-
+		q.mu.Lock()
 		if _, ok := q.known[src]; !ok {
-			q.known[src] = q.Ruleset.Window
+			q.known[src] = 1
 		}
+
 		q.known[src]++
-		q.Patrons.Replace(src, count, q.known[src]*time.Second)
+		extwindow := q.Ruleset.Window + q.known[src]
+		q.mu.Unlock()
+		q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second)
 		q.debugPrint("ratelimit (strictly limited): ", count, " ", src)
 		return true
 	}
