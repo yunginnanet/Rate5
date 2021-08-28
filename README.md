@@ -2,7 +2,7 @@
 [![GoDoc](https://godoc.org/github.com/yunginnanet/?status.svg)](https://godoc.org/github.com/yunginnanet/Rate5) [![Go Report Card](https://goreportcard.com/badge/github.com/yunginnanet/Rate5)](https://goreportcard.com/report/github.com/yunginnanet/Rate5)
   
 A generic ratelimitter for any golang project.  
-See [the docs](https://godoc.org/github.com/yunginnanet/Rate5) and the [examples](_example/rated.go) below for more details.
+See [the docs](https://godoc.org/github.com/yunginnanet/Rate5) and the [examples](_examples/rated.go) below for more details.
   
   
 
@@ -42,7 +42,7 @@ func (s *Server) handleTCP(c *Client) {
   
 ## In-depth example
   
-[Concurrent TCP Server with Rate5 Ratelimiter](_example/rated.go)  
+[Concurrent TCP Server with Rate5 Ratelimiter](_examples/rated.go)  
         
 ## To-Do  
 More Documentation  
