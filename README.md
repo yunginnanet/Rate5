@@ -3,11 +3,40 @@
   
 A generic ratelimitter for any golang project.    
 
-## Example Implementation
+## Short Example Implementation
 ```  
-Rater   *ratelimit.Queue   
-```  
+type Client struct {
+        ID   string
+        Conn net.Conn
 
+        loggedin  bool
+}
+
+// Rate5 doesn't care where you derive the string used for ratelimiting
+func (c Client) UniqueKey() string {
+        if !c.loggedin {
+                host, _, _ := net.SplitHostPort(c.Conn.RemoteAddr().String())
+                return host
+        }
+        return c.ID
+}
+  
+func (s *Server) handleTCP(c *Client) {
+	defer func() {
+		c.Conn.Close()
+		println("closed: " + c.Conn.RemoteAddr().String())
+	}()
+
+	// Returns true if ratelimited
+	if Rater.Check(c) {
+		c.Conn.Write([]byte("too many connections"))
+		return
+	}
+    // handle connection ... 
+}
+    
+```  
+  
 ## To-Do  
 More documentation  
-Testing (figuring out what to-do)
+Test cases
