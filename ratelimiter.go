@@ -50,7 +50,7 @@ func (q *Limiter) DebugChannel() chan string {
 	return debugChannel
 }
 
-// Check checks an Identities UniqueKey() output against a list of cached strings to determine ratelimitting status
+// Check checks and increments an Identities UniqueKey() output against a list of cached strings to determine and raise it's ratelimitting status
 func (q *Limiter) Check(from Identity) bool {
 	var (
 		count int
@@ -85,6 +85,15 @@ func (q *Limiter) Check(from Identity) bool {
 		return true
 	}
 	return false
+}
+
+// Peek checks an Identities UniqueKey() output against a list of cached strings to determine ratelimitting status without adding to its request count
+func (q *Limiter) Peek(from Identity) bool {
+	if _, ok := q.Patrons.Get(from.UniqueKey()); ok {
+		return true
+	} else {
+		return false
+	}
 }
 
 func (q *Limiter) debugPrint(a ...interface{}) {

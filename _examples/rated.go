@@ -112,7 +112,7 @@ func (s *Server) handleTCP(c *Client) {
 				c.send(login.Time.Format("Mon, 02 Jan 2006 15:04:05 MST") + ": " + login.IP + "\n")
 			}
 		case "help":
-			c.send("history, whoami, logout")
+			c.send("history, whoami, logout\n")
 		case "whoami":
 			c.send(c.ID + "\n")
 		case "quit":
