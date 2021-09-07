@@ -1,8 +1,9 @@
 package ratelimit
 
 import (
-	cache "github.com/patrickmn/go-cache"
 	"sync"
+
+	"github.com/patrickmn/go-cache"
 )
 
 const (

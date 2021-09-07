@@ -2,9 +2,10 @@ package ratelimit
 
 import (
 	"fmt"
-	cache "github.com/patrickmn/go-cache"
 	"sync"
 	"time"
+
+	"github.com/patrickmn/go-cache"
 )
 
 // NewDefaultLimiter returns a ratelimiter with default settings without Strict mode
@@ -91,9 +92,9 @@ func (q *Limiter) Check(from Identity) bool {
 func (q *Limiter) Peek(from Identity) bool {
 	if _, ok := q.Patrons.Get(from.UniqueKey()); ok {
 		return true
-	} else {
-		return false
 	}
+
+	return false
 }
 
 func (q *Limiter) debugPrint(a ...interface{}) {

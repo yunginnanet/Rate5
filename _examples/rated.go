@@ -2,26 +2,48 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/base64"
-	rate5 "github.com/yunginnanet/Rate5"
-	"math/rand"
+	"encoding/binary"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
 	"time"
+
+	rate5 "github.com/yunginnanet/Rate5"
 )
 
+// characters used for registration IDs
+const charset = "abcdefghijklmnopqrstuvwxyz1234567890"
+
+var (
+	// Rater is our connection ratelimiter using default limiter settings.
+	Rater *rate5.Limiter
+	// RegRater will only allow one registration per 50 seconds and will add to the wait each time you get limited. (by IP)
+	RegRater *rate5.Limiter
+	// CmdRater will slow down commands sent, if not logged in by IP, if logged in by ID.
+	CmdRater *rate5.Limiter
+
+	srv     *Server
+	keySize = 8
+)
+
+// Server is an instance of our concurrent TCP server including a map of active clients
 type Server struct {
 	Map     map[string]*Client
 	AuthLog map[string][]Login
+	Exempt  map[string]bool
 	mu      *sync.RWMutex
 }
 
+// Login represents a successful login by a user
 type Login struct {
 	IP   string
 	Time time.Time
 }
 
+// Client represents a known patron of our Server
 type Client struct {
 	ID   string
 	Conn net.Conn
@@ -34,29 +56,65 @@ type Client struct {
 	read     *bufio.Reader
 }
 
-// Rate5 doesn't care where you derive the string used for ratelimiting
+// UniqueKey is an implementation of our Identity interface, in short: Rate5 doesn't care where you derive the string used for ratelimiting
 func (c Client) UniqueKey() string {
-	if !c.loggedin {
-		host, _, _ := net.SplitHostPort(c.Conn.RemoteAddr().String())
-		return host
+	if c.loggedin {
+		return c.ID
 	}
-	return c.ID
+
+	host, _, _ := net.SplitHostPort(c.Conn.RemoteAddr().String())
+	return host
 }
 
-var (
-	// Rater is our connection ratelimiter using default limiter settings.
-	Rater *rate5.Limiter
-	// RegRater will only allow one registration per 50 seconds and will add to the wait each time you get limited. (by IP)
-	RegRater *rate5.Limiter
-	// CmdRater will slow down commands sent, if not logged in by IP, if logged in by ID.
-	CmdRater *rate5.Limiter
+func init() {
+	// Rater is our connection ratelimiter
+	Rater = rate5.NewDefaultLimiter()
+	// RegRater will only allow one registration per 50 seconds and will add to the wait each time you get limited
+	RegRater = rate5.NewStrictLimiter(50, 1)
+	// CmdRater will slow down commands send when connected
+	CmdRater = rate5.NewLimiter(10, 20)
 
-	srv     *Server
-	keySize int = 8
-)
+	srv = &Server{
+		Map:     make(map[string]*Client),
+		AuthLog: make(map[string][]Login),
+		Exempt:  make(map[string]bool),
+
+		mu: &sync.RWMutex{},
+	}
+
+	srv.Exempt["127.0.0.1"] = true
+
+	rd := Rater.DebugChannel()
+	rrd := RegRater.DebugChannel()
+	crd := CmdRater.DebugChannel()
+
+	pre := "[Rate5] "
+	go func() {
+		for {
+			select {
+			case msg := <-rd:
+				println(pre + "Limit: " + msg)
+			case msg := <-rrd:
+				println(pre + "RegLimit: " + msg)
+			case msg := <-crd:
+				println(pre + "CmdLimit: " + msg)
+			default:
+				time.Sleep(time.Duration(10) * time.Millisecond)
+			}
+		}
+	}()
+}
 
 func (s *Server) handleTCP(c *Client) {
-	c.Conn.(*net.TCPConn).SetLinger(0)
+	if err := c.Conn.(*net.TCPConn).SetLinger(0); err != nil {
+		fmt.Println("error while setting setlinger:", err.Error())
+	}
+
+	// skip ratelimit checking for exempt clients
+	srv.mu.RLock()
+	_, exempt := srv.Exempt[c.UniqueKey()]
+	srv.mu.RUnlock()
+
 	defer func() {
 		c.Conn.Close()
 		println("closed: " + c.Conn.RemoteAddr().String())
@@ -89,7 +147,7 @@ func (s *Server) handleTCP(c *Client) {
 				c.send("successful login")
 				continue
 			case in == "register":
-				if !RegRater.Check(c) {
+				if !RegRater.Check(c) || exempt {
 					println("new registration from " + c.UniqueKey())
 					s.setID(c, s.getUnusedID())
 					c.send("\nregistration success\n[New ID]: " + c.ID)
@@ -118,7 +176,6 @@ func (s *Server) handleTCP(c *Client) {
 		case "quit":
 			fallthrough
 		case "exit":
-			fallthrough
 		case "logout":
 			c.loggedin = false
 			return
@@ -127,15 +184,25 @@ func (s *Server) handleTCP(c *Client) {
 }
 
 func (c *Client) send(data string) {
-	c.Conn.SetReadDeadline(time.Now().Add(c.deadline))
+	if err := c.Conn.SetReadDeadline(time.Now().Add(c.deadline)); err != nil {
+		fmt.Println("error while setting deadline:", err.Error())
+	}
 	if _, err := c.Conn.Write([]byte(data)); err != nil {
 		c.connected = false
 	}
 }
 
 func (c *Client) recv() string {
-	c.Conn.SetReadDeadline(time.Now().Add(c.deadline))
-	if CmdRater.Check(c) {
+	if err := c.Conn.SetReadDeadline(time.Now().Add(c.deadline)); err != nil {
+		fmt.Println("error while setting deadline:", err.Error())
+	}
+
+	// skip ratelimit checking for exempt clients
+	srv.mu.RLock()
+	_, ok := srv.Exempt[c.UniqueKey()]
+	srv.mu.RUnlock()
+
+	if CmdRater.Check(c) && !ok {
 		if !c.loggedin {
 			// if they hit the ratelimiter during log-in, disconnect them
 			c.connected = false
@@ -152,14 +219,19 @@ func (c *Client) recv() string {
 	return strings.ToLower(strings.TrimRight(in, "\n"))
 }
 
-const charset = "abcdefghijklmnopqrstuvwxyz1234567890"
-
-var rngseed *rand.Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
+func randUint32() uint32 {
+	b := make([]byte, 4096)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return binary.BigEndian.Uint32(b)
+}
 
 func keygen() string {
-	b := make([]byte, keySize)
-	for i := range b {
-		b[i] = charset[rngseed.Intn(len(charset))]
+	chrlen := len(charset)
+	b := make([]byte, chrlen)
+	for i := 0; i != keySize; i++ {
+		b[i] = charset[randUint32()%uint32(chrlen)]
 	}
 	return string(b)
 }
@@ -218,43 +290,8 @@ func (s *Server) authCheck(c *Client, id string) bool {
 
 func login_banner() []byte {
 	login := "CnwgG1s5MDs0MG1SG1swbRtbMG0gG1s5Nzs0MG3DhhtbMG0bWzBtIBtbOTc7NDBtzpMbWzBtG1swbSAbWzk3OzQwbc6jG1swbRtbMG0gG1swbRtbOTc7MzJtNRtbMG0bWzBtIHwKCg=="
-	str, _ := base64.StdEncoding.DecodeString(login)
-	return str
-}
-
-func init() {
-	// Rater is our connection ratelimiter
-	Rater = rate5.NewDefaultLimiter()
-	// RegRater will only allow one registration per 50 seconds and will add to the wait each time you get limited
-	RegRater = rate5.NewStrictLimiter(50, 1)
-	// CmdRater will slow down commands send when connected
-	CmdRater = rate5.NewLimiter(10, 20)
-
-	srv = &Server{
-		Map:     make(map[string]*Client),
-		AuthLog: make(map[string][]Login),
-		mu:      &sync.RWMutex{},
-	}
-
-	rd := Rater.DebugChannel()
-	rrd := RegRater.DebugChannel()
-	crd := CmdRater.DebugChannel()
-
-	pre := "[Rate5] "
-	go func() {
-		for {
-			select {
-			case msg := <-rd:
-				println(pre + "Limit: " + msg)
-			case msg := <-rrd:
-				println(pre + "RegLimit: " + msg)
-			case msg := <-crd:
-				println(pre + "CmdLimit: " + msg)
-			default:
-				time.Sleep(time.Duration(10) * time.Millisecond)
-			}
-		}
-	}()
+	data, _ := base64.StdEncoding.DecodeString(login)
+	return data
 }
 
 func main() {
