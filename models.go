@@ -1,4 +1,4 @@
-package ratelimit
+package rate5
 
 import (
 	"sync"
@@ -28,11 +28,12 @@ type Limiter struct {
 	// Ruleset is the actual ratelimitting model
 	Ruleset Policy
 	/* Debug mode (toggled here) enables debug messages
-	   delivered through a channel. See: DebugChannel() */
+	delivered through a channel. See: DebugChannel() */
 	Debug bool
 
+	count int
 	known map[interface{}]int
-	mu    *sync.Mutex
+	mu    *sync.RWMutex
 }
 
 // Policy defines the mechanics of our ratelimiter
@@ -40,10 +41,10 @@ type Policy struct {
 	// Window defines the duration in seconds that we should keep track of ratelimit triggers
 	Window int
 	/* Burst is the amount of times that Check will not trigger a limit
-	   within the duration defined by Window */
+	within the duration defined by Window */
 	Burst int
 	/* Strict mode punishes triggers of the ratelimit
-	   by increasing the amount of time they have to wait
-	   every time they trigger the limitter */
+	by increasing the amount of time they have to wait
+	every time they trigger the limitter */
 	Strict bool
 }

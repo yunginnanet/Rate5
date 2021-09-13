@@ -90,15 +90,26 @@ func init() {
 
 	pre := "[Rate5] "
 	go func() {
+		var lastcount = 0
+		var count = 0
 		for {
 			select {
 			case msg := <-rd:
-				println(pre + "Limit: " + msg)
+				fmt.Printf("%s Limit: %s \n", pre, msg)
+				count++
 			case msg := <-rrd:
-				println(pre + "RegLimit: " + msg)
+				fmt.Printf("%s RegLimit: %s \n", pre, msg)
+				count++
 			case msg := <-crd:
-				println(pre + "CmdLimit: " + msg)
+				fmt.Printf("%s CmdLimit: %s \n", pre, msg)
+				count++
 			default:
+				if count - lastcount >= 25 {
+					lastcount = count
+					fmt.Println("Rater: ", Rater.GetGrandTotalRated())
+					fmt.Println("RegRater: ",  RegRater.GetGrandTotalRated())
+					fmt.Println("CmdRater: ",  CmdRater.GetGrandTotalRated())
+				}
 				time.Sleep(time.Duration(10) * time.Millisecond)
 			}
 		}

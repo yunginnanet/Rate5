@@ -1,4 +1,4 @@
-package ratelimit
+package rate5
 
 import (
 	"fmt"
@@ -37,7 +37,7 @@ func newLimiter(window int, burst int, strict bool) *Limiter {
 	}
 	q.Patrons = cache.New(time.Duration(q.Ruleset.Window)*time.Second, 5*time.Second)
 	q.known = make(map[interface{}]int)
-	q.mu = &sync.Mutex{}
+	q.mu = &sync.RWMutex{}
 	return q
 }
 
@@ -69,6 +69,7 @@ func (q *Limiter) Check(from Identity) bool {
 	if count > q.Ruleset.Burst {
 		if !q.Ruleset.Strict {
 			q.debugPrint("ratelimit (limited): ", count, " ", src)
+			q.increment()
 			return true
 		}
 		q.mu.Lock()
@@ -83,6 +84,7 @@ func (q *Limiter) Check(from Identity) bool {
 			println("Rate5: " + err.Error())
 		}
 		q.debugPrint("ratelimit (strictly limited): ", count, " ", src)
+		q.increment()
 		return true
 	}
 	return false
@@ -95,6 +97,19 @@ func (q *Limiter) Peek(from Identity) bool {
 	}
 
 	return false
+}
+
+func (q *Limiter) increment() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.count++
+}
+
+// GetGrandTotalRated returns the historic total amount of times we have ever reported something as ratelimited
+func (q *Limiter) GetGrandTotalRated() int {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	return q.count
 }
 
 func (q *Limiter) debugPrint(a ...interface{}) {
