@@ -57,6 +57,7 @@ func (q *Limiter) Check(from Identity) bool {
 		count int
 		err   error
 	)
+
 	src := from.UniqueKey()
 	if count, err = q.Patrons.IncrementInt(src, 1); err != nil {
 		q.debugPrint("ratelimit (new): ", src)
@@ -65,29 +66,32 @@ func (q *Limiter) Check(from Identity) bool {
 		}
 		return false
 	}
+	if count < q.Ruleset.Burst {
+		return false
+	}
 
-	if count > q.Ruleset.Burst {
-		if !q.Ruleset.Strict {
-			q.debugPrint("ratelimit (limited): ", count, " ", src)
-			q.increment()
-			return true
-		}
-		q.mu.Lock()
-		if _, ok := q.known[src]; !ok {
-			q.known[src] = 1
-		}
-
-		q.known[src]++
-		extwindow := q.Ruleset.Window + q.known[src]
-		q.mu.Unlock()
-		if err := q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second); err != nil {
-			println("Rate5: " + err.Error())
-		}
-		q.debugPrint("ratelimit (strictly limited): ", count, " ", src)
+	if !q.Ruleset.Strict {
+		q.debugPrint("ratelimit (limited): ", count, " ", src)
 		q.increment()
 		return true
 	}
-	return false
+
+	q.mu.Lock()
+	if _, ok := q.known[src]; !ok {
+		q.known[src] = 1
+	}
+
+	q.known[src]++
+	extwindow := q.Ruleset.Window + q.known[src]
+	q.mu.Unlock()
+
+	if err := q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second); err != nil {
+		q.debugPrint("Rate5: " + err.Error())
+	}
+
+	q.debugPrint("ratelimit (strictly limited): ", count, " ", src)
+	q.increment()
+	return true
 }
 
 // Peek checks an Identities UniqueKey() output against a list of cached strings to determine ratelimitting status without adding to its request count
