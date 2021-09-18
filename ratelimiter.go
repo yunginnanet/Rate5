@@ -10,31 +10,43 @@ import (
 
 // NewDefaultLimiter returns a ratelimiter with default settings without Strict mode
 func NewDefaultLimiter() *Limiter {
-	return newLimiter(DefaultWindow, DefaultBurst, false)
+	return newLimiter(Policy{
+		Window: DefaultWindow,
+		Burst:  DefaultBurst,
+		Strict: false,
+	})
 }
 
 // NewLimiter returns a custom limiter witout Strict mode
 func NewLimiter(window int, burst int) *Limiter {
-	return newLimiter(window, burst, false)
+	return newLimiter(Policy{
+		Window: window,
+		Burst:  burst,
+		Strict: false,
+	})
 }
 
 // NewDefaultStrictLimiter returns a ratelimiter with default settings with Strict mode
 func NewDefaultStrictLimiter() *Limiter {
-	return newLimiter(DefaultWindow, DefaultBurst, true)
+	return newLimiter(Policy{
+		Window: DefaultWindow,
+		Burst:  DefaultBurst,
+		Strict: true,
+	})
 }
 
 // NewStrictLimiter returns a custom limiter with Strict mode
 func NewStrictLimiter(window int, burst int) *Limiter {
-	return newLimiter(window, burst, true)
-}
-
-func newLimiter(window int, burst int, strict bool) *Limiter {
-	q := new(Limiter)
-	q.Ruleset = Policy{
+	return newLimiter(Policy{
 		Window: window,
 		Burst:  burst,
-		Strict: strict,
-	}
+		Strict: true,
+	})
+}
+
+func newLimiter(policy Policy) *Limiter {
+	q := new(Limiter)
+	q.Ruleset = policy
 	q.Patrons = cache.New(time.Duration(q.Ruleset.Window)*time.Second, 5*time.Second)
 	q.known = make(map[interface{}]int)
 	q.mu = &sync.RWMutex{}
@@ -59,12 +71,11 @@ func (q *Limiter) strictLogic(src string, count int) {
 
 	q.known[src]++
 	extwindow := q.Ruleset.Window + q.known[src]
-	q.mu.Unlock()
 
 	if err := q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second); err != nil {
 		q.debugPrint("Rate5: " + err.Error())
 	}
-
+	q.mu.Unlock()
 	q.debugPrint("ratelimit (strictly limited): ", count, " ", src)
 	q.increment()
 }
@@ -72,7 +83,7 @@ func (q *Limiter) strictLogic(src string, count int) {
 // Check checks and increments an Identities UniqueKey() output against a list of cached strings to determine and raise it's ratelimitting status
 func (q *Limiter) Check(from Identity) bool {
 	var count int
-	var err   error
+	var err error
 	src := from.UniqueKey()
 	if count, err = q.Patrons.IncrementInt(src, 1); err != nil {
 		q.debugPrint("ratelimit (new): ", src)
@@ -85,8 +96,8 @@ func (q *Limiter) Check(from Identity) bool {
 		return false
 	}
 	if !q.Ruleset.Strict {
-		q.debugPrint("ratelimit (limited): ", count, " ", src)
 		q.increment()
+		q.debugPrint("ratelimit (limited): ", count, " ", src)
 		return true
 	}
 	q.strictLogic(src, count)

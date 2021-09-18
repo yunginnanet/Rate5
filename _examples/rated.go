@@ -82,7 +82,7 @@ func init() {
 		mu: &sync.RWMutex{},
 	}
 
-	srv.Exempt["127.0.0.1"] = true
+	//srv.Exempt["127.0.0.1"] = true
 
 	rd := Rater.DebugChannel()
 	rrd := RegRater.DebugChannel()
