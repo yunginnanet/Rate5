@@ -8,13 +8,18 @@ import (
 	"github.com/patrickmn/go-cache"
 )
 
-// NewDefaultLimiter returns a ratelimiter with default settings without Strict mode
+// NewDefaultLimiter returns a ratelimiter with default settings without Strict mode.
 func NewDefaultLimiter() *Limiter {
 	return newLimiter(Policy{
 		Window: DefaultWindow,
 		Burst:  DefaultBurst,
 		Strict: false,
 	})
+}
+
+// NewCustomLimiter returns a ratelimiter with the given Policy applied as the Ruleset.
+func NewCustomLimiter(policy Policy) *Limiter {
+	return newLimiter(policy)
 }
 
 // NewLimiter returns a custom limiter witout Strict mode
@@ -26,7 +31,7 @@ func NewLimiter(window int, burst int) *Limiter {
 	})
 }
 
-// NewDefaultStrictLimiter returns a ratelimiter with default settings with Strict mode
+// NewDefaultStrictLimiter returns a ratelimiter with default settings with Strict mode.
 func NewDefaultStrictLimiter() *Limiter {
 	return newLimiter(Policy{
 		Window: DefaultWindow,
@@ -35,7 +40,7 @@ func NewDefaultStrictLimiter() *Limiter {
 	})
 }
 
-// NewStrictLimiter returns a custom limiter with Strict mode
+// NewStrictLimiter returns a custom limiter with Strict mode.
 func NewStrictLimiter(window int, burst int) *Limiter {
 	return newLimiter(Policy{
 		Window: window,
@@ -80,7 +85,7 @@ func (q *Limiter) strictLogic(src string, count int) {
 	q.increment()
 }
 
-// Check checks and increments an Identities UniqueKey() output against a list of cached strings to determine and raise it's ratelimitting status
+// Check checks and increments an Identities UniqueKey() output against a list of cached strings to determine and raise it's ratelimitting status.
 func (q *Limiter) Check(from Identity) bool {
 	var count int
 	var err error
@@ -104,7 +109,7 @@ func (q *Limiter) Check(from Identity) bool {
 	return true
 }
 
-// Peek checks an Identities UniqueKey() output against a list of cached strings to determine ratelimitting status without adding to its request count
+// Peek checks an Identities UniqueKey() output against a list of cached strings to determine ratelimitting status without adding to its request count.
 func (q *Limiter) Peek(from Identity) bool {
 	if _, ok := q.Patrons.Get(from.UniqueKey()); ok {
 		return true
@@ -119,7 +124,7 @@ func (q *Limiter) increment() {
 	q.count++
 }
 
-// GetGrandTotalRated returns the historic total amount of times we have ever reported something as ratelimited
+// GetGrandTotalRated returns the historic total amount of times we have ever reported something as ratelimited.
 func (q *Limiter) GetGrandTotalRated() int {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
