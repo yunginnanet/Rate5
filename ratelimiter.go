@@ -51,31 +51,7 @@ func (q *Limiter) DebugChannel() chan string {
 	return debugChannel
 }
 
-// Check checks and increments an Identities UniqueKey() output against a list of cached strings to determine and raise it's ratelimitting status
-func (q *Limiter) Check(from Identity) bool {
-	var (
-		count int
-		err   error
-	)
-
-	src := from.UniqueKey()
-	if count, err = q.Patrons.IncrementInt(src, 1); err != nil {
-		q.debugPrint("ratelimit (new): ", src)
-		if err := q.Patrons.Add(src, 1, time.Duration(q.Ruleset.Window)*time.Second); err != nil {
-			println("Rate5: " + err.Error())
-		}
-		return false
-	}
-	if count < q.Ruleset.Burst {
-		return false
-	}
-
-	if !q.Ruleset.Strict {
-		q.debugPrint("ratelimit (limited): ", count, " ", src)
-		q.increment()
-		return true
-	}
-
+func (q *Limiter) strictLogic(src string, count int) {
 	q.mu.Lock()
 	if _, ok := q.known[src]; !ok {
 		q.known[src] = 1
@@ -91,6 +67,29 @@ func (q *Limiter) Check(from Identity) bool {
 
 	q.debugPrint("ratelimit (strictly limited): ", count, " ", src)
 	q.increment()
+}
+
+// Check checks and increments an Identities UniqueKey() output against a list of cached strings to determine and raise it's ratelimitting status
+func (q *Limiter) Check(from Identity) bool {
+	var count int
+	var err   error
+	src := from.UniqueKey()
+	if count, err = q.Patrons.IncrementInt(src, 1); err != nil {
+		q.debugPrint("ratelimit (new): ", src)
+		if err := q.Patrons.Add(src, 1, time.Duration(q.Ruleset.Window)*time.Second); err != nil {
+			println("Rate5: " + err.Error())
+		}
+		return false
+	}
+	if count < q.Ruleset.Burst {
+		return false
+	}
+	if !q.Ruleset.Strict {
+		q.debugPrint("ratelimit (limited): ", count, " ", src)
+		q.increment()
+		return true
+	}
+	q.strictLogic(src, count)
 	return true
 }
 

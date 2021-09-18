@@ -140,7 +140,7 @@ func (s *Server) handleTCP(c *Client) {
 
 	c.read = bufio.NewReader(c.Conn)
 
-	c.Conn.Write(login_banner())
+	c.Conn.Write(loginBanner())
 
 	for {
 		if !c.connected {
@@ -299,7 +299,7 @@ func (s *Server) authCheck(c *Client, id string) bool {
 
 }
 
-func login_banner() []byte {
+func loginBanner() []byte {
 	login := "CnwgG1s5MDs0MG1SG1swbRtbMG0gG1s5Nzs0MG3DhhtbMG0bWzBtIBtbOTc7NDBtzpMbWzBtG1swbSAbWzk3OzQwbc6jG1swbRtbMG0gG1swbRtbOTc7MzJtNRtbMG0bWzBtIHwKCg=="
 	data, _ := base64.StdEncoding.DecodeString(login)
 	return data
