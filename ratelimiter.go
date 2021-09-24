@@ -3,6 +3,7 @@ package rate5
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -53,7 +54,7 @@ func newLimiter(policy Policy) *Limiter {
 	q := new(Limiter)
 	q.Ruleset = policy
 	q.Patrons = cache.New(time.Duration(q.Ruleset.Window)*time.Second, 5*time.Second)
-	q.known = make(map[interface{}]int)
+	q.known = make(map[interface{}]*rated)
 	q.mu = &sync.RWMutex{}
 	return q
 }
@@ -68,14 +69,24 @@ func (q *Limiter) DebugChannel() chan string {
 	return debugChannel
 }
 
+func (s *rated) inc() {
+	if s.seen.Load() == nil {
+		s.seen.Store(1)
+		return
+	}
+	s.seen.Store(s.seen.Load().(int) + 1)
+}
+
 func (q *Limiter) strictLogic(src string, count int) {
 	q.mu.Lock()
 	if _, ok := q.known[src]; !ok {
-		q.known[src] = 1
+		q.known[src]=&rated{
+			seen: atomic.Value{},
+		}
 	}
 
-	q.known[src]++
-	extwindow := q.Ruleset.Window + q.known[src]
+	q.known[src].inc()
+	extwindow := q.Ruleset.Window + q.known[src].seen.Load().(int)
 
 	if err := q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second); err != nil {
 		q.debugPrint("Rate5: " + err.Error())

@@ -2,6 +2,7 @@ package rate5
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/patrickmn/go-cache"
 )
@@ -20,6 +21,10 @@ type Identity interface {
 	UniqueKey() string
 }
 
+type rated struct {
+	seen atomic.Value
+}
+
 // Limiter implements an Enforcer to create an arbitrary ratelimiter.
 type Limiter struct {
 	Source Identity
@@ -32,7 +37,7 @@ type Limiter struct {
 	Debug bool
 
 	count int
-	known map[interface{}]int
+	known map[interface{}]*rated
 	mu    *sync.RWMutex
 }
 
