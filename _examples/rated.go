@@ -51,7 +51,7 @@ type Client struct {
 
 	loggedin  bool
 	connected bool
-	autlog    []Login
+	authlog   []Login
 
 	deadline time.Duration
 	read     *bufio.Reader
@@ -107,7 +107,6 @@ func init() {
 	}
 
 	argParse()
-
 
 	rd := Rater.DebugChannel()
 	rrd := RegRater.DebugChannel()
@@ -278,6 +277,7 @@ func (c *Client) recv() string {
 func randUint32() uint32 {
 	b := make([]byte, 4096)
 	if _, err := rand.Read(b); err != nil {
+
 		panic(err)
 	}
 	return binary.BigEndian.Uint32(b)
@@ -318,6 +318,7 @@ func (s *Server) setID(c *Client, id string) {
 
 func (s *Server) replaceSession(c *Client, id string) {
 	s.mu.Lock()
+
 	s.AuthLog[id] = append(s.AuthLog[id], Login{
 		// we're not logged in so UniqueKey is still the IP address
 		IP:   c.UniqueKey(),

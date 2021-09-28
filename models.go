@@ -1,7 +1,6 @@
 package rate5
 
 import (
-	"sync"
 	"sync/atomic"
 
 	"github.com/patrickmn/go-cache"
@@ -14,6 +13,11 @@ const (
 	DefaultBurst = 25
 )
 
+const (
+	stateUnlocked uint32 = iota
+	stateLocked
+)
+
 var debugChannel chan string
 
 // Identity is an interface that allows any arbitrary type to be used for a unique key in ratelimit checks when implemented.
@@ -23,6 +27,7 @@ type Identity interface {
 
 type rated struct {
 	seen atomic.Value
+	locker *uint32
 }
 
 // Limiter implements an Enforcer to create an arbitrary ratelimiter.
@@ -36,9 +41,8 @@ type Limiter struct {
 	delivered through a channel. See: DebugChannel() */
 	Debug bool
 
-	count int
+	count atomic.Value
 	known map[interface{}]*rated
-	mu    *sync.RWMutex
 }
 
 // Policy defines the mechanics of our ratelimiter.
