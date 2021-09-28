@@ -2,12 +2,11 @@ package rate5
 
 import (
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/patrickmn/go-cache"
 )
+
 
 // NewDefaultLimiter returns a ratelimiter with default settings without Strict mode.
 func NewDefaultLimiter() *Limiter {
@@ -55,7 +54,6 @@ func newLimiter(policy Policy) *Limiter {
 	q.Ruleset = policy
 	q.Patrons = cache.New(time.Duration(q.Ruleset.Window)*time.Second, 5*time.Second)
 	q.known = make(map[interface{}]*rated)
-	q.mu = &sync.RWMutex{}
 	return q
 }
 
@@ -78,20 +76,14 @@ func (s *rated) inc() {
 }
 
 func (q *Limiter) strictLogic(src string, count int) {
-	q.mu.Lock()
 	if _, ok := q.known[src]; !ok {
-		q.known[src]=&rated{
-			seen: atomic.Value{},
-		}
+		q.known[src]=&rated{}
 	}
-
 	q.known[src].inc()
 	extwindow := q.Ruleset.Window + q.known[src].seen.Load().(int)
-
 	if err := q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second); err != nil {
 		q.debugPrint("Rate5: " + err.Error())
 	}
-	q.mu.Unlock()
 	q.debugPrint("ratelimit (strictly limited): ", count, " ", src)
 	q.increment()
 }
@@ -122,24 +114,29 @@ func (q *Limiter) Check(from Identity) bool {
 
 // Peek checks an Identities UniqueKey() output against a list of cached strings to determine ratelimitting status without adding to its request count.
 func (q *Limiter) Peek(from Identity) bool {
-	if _, ok := q.Patrons.Get(from.UniqueKey()); ok {
-		return true
+	if ct, ok := q.Patrons.Get(from.UniqueKey()); ok {
+		count := ct.(int)
+		if count > q.Ruleset.Burst {
+			return true
+		}
 	}
-
 	return false
 }
 
 func (q *Limiter) increment() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.count++
+	if q.count.Load() == nil {
+		q.count.Store(1)
+		return
+	}
+	q.count.Store(q.count.Load().(int) + 1)
 }
 
 // GetGrandTotalRated returns the historic total amount of times we have ever reported something as ratelimited.
 func (q *Limiter) GetGrandTotalRated() int {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	return q.count
+	if q.count.Load() == nil {
+		return 0
+	}
+	return q.count.Load().(int)
 }
 
 func (q *Limiter) debugPrint(a ...interface{}) {

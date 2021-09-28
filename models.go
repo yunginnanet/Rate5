@@ -1,7 +1,6 @@
 package rate5
 
 import (
-	"sync"
 	"sync/atomic"
 
 	"github.com/patrickmn/go-cache"
@@ -36,9 +35,8 @@ type Limiter struct {
 	delivered through a channel. See: DebugChannel() */
 	Debug bool
 
-	count int
+	count atomic.Value
 	known map[interface{}]*rated
-	mu    *sync.RWMutex
 }
 
 // Policy defines the mechanics of our ratelimiter.
