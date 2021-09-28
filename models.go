@@ -26,8 +26,8 @@ type Identity interface {
 }
 
 type rated struct {
-	seen atomic.Value
-	locker *uint32
+	seen *atomic.Value
+	locker uint32
 }
 
 // Limiter implements an Enforcer to create an arbitrary ratelimiter.
@@ -42,7 +42,7 @@ type Limiter struct {
 	Debug bool
 
 	count atomic.Value
-	known map[interface{}]*rated
+	known map[interface{}]rated
 }
 
 // Policy defines the mechanics of our ratelimiter.

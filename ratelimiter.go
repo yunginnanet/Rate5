@@ -54,7 +54,8 @@ func newLimiter(policy Policy) *Limiter {
 	q := new(Limiter)
 	q.Ruleset = policy
 	q.Patrons = cache.New(time.Duration(q.Ruleset.Window)*time.Second, 5*time.Second)
-	q.known = make(map[interface{}]*rated)
+	q.known = make(map[interface{}]rated)
+
 	return q
 }
 
@@ -68,11 +69,11 @@ func (q *Limiter) DebugChannel() chan string {
 	return debugChannel
 }
 
-func (s *rated) inc() {
-	for !atomic.CompareAndSwapUint32(s.locker, stateUnlocked, stateLocked) {
+func (s rated) inc() {
+	for !atomic.CompareAndSwapUint32(&s.locker, stateUnlocked, stateLocked) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	defer atomic.StoreUint32(s.locker, stateUnlocked)
+	defer atomic.StoreUint32(&s.locker, stateUnlocked)
 
 	if s.seen.Load() == nil {
 		s.seen.Store(1)
@@ -83,8 +84,10 @@ func (s *rated) inc() {
 
 func (q *Limiter) strictLogic(src string, count int) {
 	if _, ok := q.known[src]; !ok {
-		atomic.StoreUint32(q.known[src].locker, stateUnlocked)
-		q.known[src]=&rated{seen: atomic.Value{}}
+		q.known[src]=rated{
+			seen: &atomic.Value{},
+			locker: stateUnlocked,
+		}
 	}
 	q.known[src].inc()
 	extwindow := q.Ruleset.Window + q.known[src].seen.Load().(int)
