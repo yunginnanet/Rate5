@@ -26,7 +26,7 @@ type Identity interface {
 }
 
 type rated struct {
-	seen *atomic.Value
+	seen   *atomic.Value
 	locker uint32
 }
 
@@ -41,8 +41,9 @@ type Limiter struct {
 	delivered through a channel. See: DebugChannel() */
 	Debug bool
 
-	count atomic.Value
-	known map[interface{}]rated
+	locker uint32
+	count  atomic.Value
+	known  map[interface{}]rated
 }
 
 // Policy defines the mechanics of our ratelimiter.
