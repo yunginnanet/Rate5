@@ -54,6 +54,7 @@ func newLimiter(policy Policy) *Limiter {
 	q.Ruleset = policy
 	q.Patrons = cache.New(time.Duration(q.Ruleset.Window)*time.Second, 5*time.Second)
 	q.known = make(map[interface{}]rated)
+	q.Debug = false
 
 	return q
 }
@@ -110,7 +111,7 @@ func (q *Limiter) Check(from Identity) bool {
 	if count, err = q.Patrons.IncrementInt(src, 1); err != nil {
 		q.debugPrint("ratelimit (new): ", src)
 		if err := q.Patrons.Add(src, 1, time.Duration(q.Ruleset.Window)*time.Second); err != nil {
-			println("Rate5: " + err.Error())
+			q.debugPrint("Rate5: " + err.Error())
 		}
 		return false
 	}
