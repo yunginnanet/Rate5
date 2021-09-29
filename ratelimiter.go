@@ -8,7 +8,6 @@ import (
 	"github.com/patrickmn/go-cache"
 )
 
-
 // NewDefaultLimiter returns a ratelimiter with default settings without Strict mode.
 func NewDefaultLimiter() *Limiter {
 	return newLimiter(Policy{
@@ -83,9 +82,14 @@ func (s rated) inc() {
 }
 
 func (q *Limiter) strictLogic(src string, count int) {
+	for !atomic.CompareAndSwapUint32(&q.locker, stateUnlocked, stateLocked) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	defer atomic.StoreUint32(&q.locker, stateUnlocked)
+
 	if _, ok := q.known[src]; !ok {
-		q.known[src]=rated{
-			seen: &atomic.Value{},
+		q.known[src] = rated{
+			seen:   &atomic.Value{},
 			locker: stateUnlocked,
 		}
 	}
