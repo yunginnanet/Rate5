@@ -285,7 +285,7 @@ func randUint32() uint32 {
 
 func keygen() string {
 	chrlen := len(charset)
-	b := make([]byte, chrlen)
+	b := make([]byte, keySize)
 	for i := 0; i != keySize; i++ {
 		b[i] = charset[randUint32()%uint32(chrlen)]
 	}
