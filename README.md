@@ -1,5 +1,6 @@
 # Rate5  
 [![GoDoc](https://godoc.org/github.com/yunginnanet/?status.svg)](https://godoc.org/github.com/yunginnanet/Rate5) [![Go Report Card](https://goreportcard.com/badge/github.com/yunginnanet/Rate5)](https://goreportcard.com/report/github.com/yunginnanet/Rate5) [![Go](https://github.com/yunginnanet/Rate5/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/yunginnanet/Rate5/actions/workflows/go.yml)
+[![codecov](https://codecov.io/gh/yunginnanet/Rate5/branch/main/graph/badge.svg?token=R7WU58G5L7)](https://codecov.io/gh/yunginnanet/Rate5)
   
 A generic ratelimitter for any golang project.  
 See [the docs](https://godoc.org/github.com/yunginnanet/Rate5) and the [examples](_examples/rated.go) below for more details.
