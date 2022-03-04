@@ -2,6 +2,7 @@ package rate5
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -54,18 +55,27 @@ func newLimiter(policy Policy) *Limiter {
 	q.Ruleset = policy
 	q.Patrons = cache.New(time.Duration(q.Ruleset.Window)*time.Second, 5*time.Second)
 	q.known = make(map[interface{}]rated)
-	q.Debug = false
+	q.dmu = &sync.RWMutex{}
+	q.SetDebug(false)
 
 	return q
 }
 
+func (q *Limiter) SetDebug(on bool) {
+	q.dmu.Lock()
+	q.Debug = on
+	q.dmu.Unlock()
+}
+
 // DebugChannel enables Debug mode and returns a channel where debug messages are sent (NOTE: You must read from this channel if created via this function or it will block)
 func (q *Limiter) DebugChannel() chan string {
+	q.dmu.Lock()
 	q.Patrons.OnEvicted(func(src string, count interface{}) {
 		q.debugPrint("ratelimit (expired): ", src, " ", count)
 	})
 	q.Debug = true
 	debugChannel = make(chan string, 20)
+	q.dmu.Unlock()
 	return debugChannel
 }
 
@@ -97,7 +107,7 @@ func (q *Limiter) strictLogic(src string, count int) {
 	q.known[src].inc()
 	extwindow := q.Ruleset.Window + q.known[src].seen.Load().(int)
 	if err := q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second); err != nil {
-		q.debugPrint("Rate5: " + err.Error())
+		q.debugPrint("ratelimit: " + err.Error())
 	}
 	q.debugPrint("ratelimit (strictly limited): ", count, " ", src)
 	q.increment()
@@ -111,7 +121,7 @@ func (q *Limiter) Check(from Identity) bool {
 	if count, err = q.Patrons.IncrementInt(src, 1); err != nil {
 		q.debugPrint("ratelimit (new): ", src)
 		if err := q.Patrons.Add(src, 1, time.Duration(q.Ruleset.Window)*time.Second); err != nil {
-			q.debugPrint("Rate5: " + err.Error())
+			q.debugPrint("ratelimit: " + err.Error())
 		}
 		return false
 	}
@@ -155,7 +165,11 @@ func (q *Limiter) GetGrandTotalRated() int {
 }
 
 func (q *Limiter) debugPrint(a ...interface{}) {
+	q.dmu.RLock()
 	if q.Debug {
+		q.dmu.RUnlock()
 		debugChannel <- fmt.Sprint(a...)
+		return
 	}
+	q.dmu.RUnlock()
 }

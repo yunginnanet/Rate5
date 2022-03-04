@@ -174,7 +174,9 @@ func Test_ConcurrentSafetyTest(t *testing.T) {
 
 	usedkeys := make(map[string]interface{})
 
-	for n := 0; n != 5000; n++ {
+	const jobs = 1000
+
+	for n := 0; n != jobs ; n++ {
 		randos[n] = new(randomPatron)
 		ok := true
 		for ok {
@@ -188,17 +190,17 @@ func Test_ConcurrentSafetyTest(t *testing.T) {
 
 	t.Logf("generated %d Patrons with unique keys", len(randos))
 
-	doneChan := make(chan bool)
-	finChan := make(chan bool)
+	doneChan := make(chan bool, 10)
+	finChan := make(chan bool, 10)
 	var finished = 0
 
 	for _, rp := range randos {
 		for n := 0; n != 5; n++ {
-			go func() {
-				limiter.Check(rp)
-				limiter.Peek(rp)
+			go func(randomp *randomPatron) {
+				limiter.Check(randomp)
+				limiter.Peek(randomp)
 				finChan <- true
-			}()
+			}(rp)
 		}
 	}
 
@@ -208,7 +210,7 @@ func Test_ConcurrentSafetyTest(t *testing.T) {
 		case <-finChan:
 			finished++
 		default:
-			if finished == 25000 {
+			if finished == (jobs * 5) {
 				done = true
 				break
 			}
