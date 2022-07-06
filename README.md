@@ -3,6 +3,7 @@
 [![codecov](https://codecov.io/gh/yunginnanet/Rate5/branch/main/graph/badge.svg?token=R7WU58G5L7)](https://codecov.io/gh/yunginnanet/Rate5)
 
 A performant and generic ratelimitter for any golang project.
+
 See [the docs](https://godoc.org/github.com/yunginnanet/Rate5) and the unit tests as well as the below example for more details.
 
 ## Basic Example
