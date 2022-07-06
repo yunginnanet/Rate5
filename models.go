@@ -1,8 +1,8 @@
 package rate5
 
 import (
-	"sync/atomic"
 	"sync"
+
 	"github.com/patrickmn/go-cache"
 )
 
@@ -13,11 +13,6 @@ const (
 	DefaultBurst = 25
 )
 
-const (
-	stateUnlocked uint32 = iota
-	stateLocked
-)
-
 var debugChannel chan string
 
 // Identity is an interface that allows any arbitrary type to be used for a unique key in ratelimit checks when implemented.
@@ -26,8 +21,7 @@ type Identity interface {
 }
 
 type rated struct {
-	seen   *atomic.Value
-	locker uint32
+	seen int64
 }
 
 // Limiter implements an Enforcer to create an arbitrary ratelimiter.
@@ -37,23 +31,22 @@ type Limiter struct {
 	Patrons *cache.Cache
 	// Ruleset is the actual ratelimitting model.
 	Ruleset Policy
-	/* Debug mode (toggled here) enables debug messages
+	/* debug mode (toggled here) enables debug messages
 	delivered through a channel. See: DebugChannel() */
-	Debug bool
+	debug bool
 
 	locker uint32
-	count  atomic.Value
 	known  map[interface{}]rated
 
-	dmu *sync.RWMutex
+	*sync.RWMutex
 }
 
 // Policy defines the mechanics of our ratelimiter.
 type Policy struct {
 	// Window defines the duration in seconds that we should keep track of ratelimit triggers,
-	Window int
+	Window int64
 	// Burst is the amount of times that Check will not trigger a limit within the duration defined by Window.
-	Burst int
+	Burst int64
 	// Strict mode punishes triggers of the ratelimitby increasing the amount of time they have to wait every time they trigger the limitter.
 	Strict bool
 }

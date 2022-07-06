@@ -2,15 +2,15 @@ package main
 
 import (
 	"bufio"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"git.tcp.direct/kayos/common/entropy"
 
 	rate5 "github.com/yunginnanet/Rate5"
 )
@@ -86,7 +86,6 @@ func argParse() {
 		default:
 			continue
 		}
-
 	}
 }
 
@@ -116,7 +115,6 @@ func init() {
 
 func watchDebug(rd, rrd, crd chan string) {
 	pre := "[Rate5] "
-	var lastcount = 0
 	var count = 0
 	for {
 		select {
@@ -130,12 +128,6 @@ func watchDebug(rd, rrd, crd chan string) {
 			fmt.Printf("%s CmdLimit: %s \n", pre, msg)
 			count++
 		default:
-			if count-lastcount >= 25 {
-				lastcount = count
-				fmt.Println("Rater: ", Rater.GetGrandTotalRated())
-				fmt.Println("RegRater: ", RegRater.GetGrandTotalRated())
-				fmt.Println("CmdRater: ", CmdRater.GetGrandTotalRated())
-			}
 			time.Sleep(time.Duration(10) * time.Millisecond)
 		}
 	}
@@ -164,7 +156,6 @@ func (s *Server) preLogin(c *Client) {
 		c.send("invalid. type 'REGISTER' to register a new ID\n")
 		return
 	}
-
 }
 
 func (s *Server) mainPrompt(c *Client) {
@@ -275,12 +266,7 @@ func (c *Client) recv() string {
 }
 
 func randUint32() uint32 {
-	b := make([]byte, 4096)
-	if _, err := rand.Read(b); err != nil {
-
-		panic(err)
-	}
-	return binary.BigEndian.Uint32(b)
+	return entropy.GetOptimizedRand().Uint32()
 }
 
 func keygen() string {
