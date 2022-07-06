@@ -152,8 +152,8 @@ func concurrentTest(t *testing.T, jobs int, iterCount int, burst int64, shouldLi
 		}
 	}
 
-	t.Logf("generated %d Patrons with unique keys, running Check() with them %d times concurrently...",
-		len(randos), iterCount)
+	t.Logf("generated %d Patrons with unique keys, running Check() with them %d times concurrently with a burst limit of %d...",
+		len(randos), iterCount, burst)
 
 	finChan := make(chan bool, 10)
 	var finished = 0
@@ -200,11 +200,11 @@ testloop:
 }
 
 func Test_ConcurrentShouldNotLimit(t *testing.T) {
-	concurrentTest(t, 500, 20, 20, false)
-	concurrentTest(t, 500, 50, 50, false)
+	concurrentTest(t, 100, 20, 20, false)
+	concurrentTest(t, 100, 50, 50, false)
 }
 
 func Test_ConcurrentShouldLimit(t *testing.T) {
-	concurrentTest(t, 500, 21, 20, true)
-	concurrentTest(t, 500, 51, 50, true)
+	concurrentTest(t, 100, 21, 20, true)
+	concurrentTest(t, 100, 51, 50, true)
 }

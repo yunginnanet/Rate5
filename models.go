@@ -20,10 +20,6 @@ type Identity interface {
 	UniqueKey() string
 }
 
-type rated struct {
-	seen int64
-}
-
 // Limiter implements an Enforcer to create an arbitrary ratelimiter.
 type Limiter struct {
 	Source Identity
@@ -36,7 +32,7 @@ type Limiter struct {
 	debug bool
 
 	locker uint32
-	known  map[interface{}]rated
+	known  map[interface{}]*int64
 
 	*sync.RWMutex
 }

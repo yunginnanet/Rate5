@@ -55,7 +55,7 @@ func newLimiter(policy Policy) *Limiter {
 	return &Limiter{
 		Ruleset: policy,
 		Patrons: cache.New(time.Duration(policy.Window)*time.Second, 5*time.Second),
-		known:   make(map[interface{}]rated),
+		known:   make(map[interface{}]*int64),
 		RWMutex: &sync.RWMutex{},
 		debug:   false,
 	}
@@ -80,34 +80,28 @@ func (q *Limiter) DebugChannel() chan string {
 	return debugChannel
 }
 
-func (r rated) count() int64 {
-	return atomic.LoadInt64(&r.seen)
+func intPtr(i int64) *int64 {
+	return &i
 }
 
-func (r rated) inc() {
-	atomic.AddInt64(&r.seen, 1)
-}
-
-func (q *Limiter) checkStrictPatron(src interface{}) {
+func (q *Limiter) getHitsPtr(src string) *int64 {
 	q.RLock()
-	if _, ok := q.known[src]; !ok {
-		q.RUnlock()
-		q.newStrictPatron(src)
-		q.RLock()
+	defer q.RUnlock()
+	if _, ok := q.known[src]; ok {
+		return q.known[src]
 	}
 	q.RUnlock()
-}
-
-func (q *Limiter) newStrictPatron(src interface{}) {
 	q.Lock()
-	q.known[src] = rated{seen: 0}
+	q.known[src] = intPtr(0)
 	q.Unlock()
+	q.RLock()
+	return q.known[src]
 }
 
 func (q *Limiter) strictLogic(src string, count int64) {
-	q.checkStrictPatron(src)
-	q.known[src].inc()
-	extwindow := q.Ruleset.Window + q.known[src].count()
+	knownHits := q.getHitsPtr(src)
+	atomic.AddInt64(knownHits, 1)
+	extwindow := q.Ruleset.Window + atomic.LoadInt64(knownHits)
 	if err := q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second); err != nil {
 		q.debugPrint("ratelimit (strict) error: " + err.Error())
 	}
