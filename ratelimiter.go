@@ -2,6 +2,7 @@ package rate5
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,8 +27,8 @@ func NewCustomLimiter(policy Policy) *Limiter {
 // NewLimiter returns a custom limiter witout Strict mode
 func NewLimiter(window int, burst int) *Limiter {
 	return newLimiter(Policy{
-		Window: window,
-		Burst:  burst,
+		Window: int64(window),
+		Burst:  int64(burst),
 		Strict: false,
 	})
 }
@@ -44,92 +45,90 @@ func NewDefaultStrictLimiter() *Limiter {
 // NewStrictLimiter returns a custom limiter with Strict mode.
 func NewStrictLimiter(window int, burst int) *Limiter {
 	return newLimiter(Policy{
-		Window: window,
-		Burst:  burst,
+		Window: int64(window),
+		Burst:  int64(burst),
 		Strict: true,
 	})
 }
 
 func newLimiter(policy Policy) *Limiter {
-	q := new(Limiter)
-	q.Ruleset = policy
-	q.Patrons = cache.New(time.Duration(q.Ruleset.Window)*time.Second, 5*time.Second)
-	q.known = make(map[interface{}]rated)
-	q.dmu = &sync.RWMutex{}
-	q.SetDebug(false)
-
-	return q
+	return &Limiter{
+		Ruleset: policy,
+		Patrons: cache.New(time.Duration(policy.Window)*time.Second, 5*time.Second),
+		known:   make(map[interface{}]*int64),
+		RWMutex: &sync.RWMutex{},
+		debug:   false,
+	}
 }
 
 func (q *Limiter) SetDebug(on bool) {
-	q.dmu.Lock()
-	q.Debug = on
-	q.dmu.Unlock()
+	q.Lock()
+	q.debug = on
+	q.Unlock()
 }
 
-// DebugChannel enables Debug mode and returns a channel where debug messages are sent (NOTE: You must read from this channel if created via this function or it will block)
+// DebugChannel enables debug mode and returns a channel where debug messages are sent.
+// NOTE: You must read from this channel if created via this function or it will block
 func (q *Limiter) DebugChannel() chan string {
-	q.dmu.Lock()
+	q.Lock()
 	q.Patrons.OnEvicted(func(src string, count interface{}) {
 		q.debugPrint("ratelimit (expired): ", src, " ", count)
 	})
-	q.Debug = true
+	q.debug = true
 	debugChannel = make(chan string, 20)
-	q.dmu.Unlock()
+	q.Unlock()
 	return debugChannel
 }
 
-func (s rated) inc() {
-	for !atomic.CompareAndSwapUint32(&s.locker, stateUnlocked, stateLocked) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	defer atomic.StoreUint32(&s.locker, stateUnlocked)
-
-	if s.seen.Load() == nil {
-		s.seen.Store(1)
-		return
-	}
-	s.seen.Store(s.seen.Load().(int) + 1)
+func intPtr(i int64) *int64 {
+	return &i
 }
 
-func (q *Limiter) strictLogic(src string, count int) {
-	for !atomic.CompareAndSwapUint32(&q.locker, stateUnlocked, stateLocked) {
-		time.Sleep(10 * time.Millisecond)
+func (q *Limiter) getHitsPtr(src string) *int64 {
+	q.RLock()
+	defer q.RUnlock()
+	if _, ok := q.known[src]; ok {
+		return q.known[src]
 	}
-	defer atomic.StoreUint32(&q.locker, stateUnlocked)
+	q.RUnlock()
+	q.Lock()
+	q.known[src] = intPtr(0)
+	q.Unlock()
+	q.RLock()
+	return q.known[src]
+}
 
-	if _, ok := q.known[src]; !ok {
-		q.known[src] = rated{
-			seen:   &atomic.Value{},
-			locker: stateUnlocked,
-		}
-	}
-	q.known[src].inc()
-	extwindow := q.Ruleset.Window + q.known[src].seen.Load().(int)
+func (q *Limiter) strictLogic(src string, count int64) {
+	knownHits := q.getHitsPtr(src)
+	atomic.AddInt64(knownHits, 1)
+	extwindow := q.Ruleset.Window + atomic.LoadInt64(knownHits)
 	if err := q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second); err != nil {
-		q.debugPrint("ratelimit: " + err.Error())
+		q.debugPrint("ratelimit (strict) error: " + err.Error())
 	}
-	q.debugPrint("ratelimit (strictly limited): ", count, " ", src)
-	q.increment()
+	q.debugPrint("ratelimit (strict) limited: ", count, " ", src)
 }
 
 // Check checks and increments an Identities UniqueKey() output against a list of cached strings to determine and raise it's ratelimitting status.
-func (q *Limiter) Check(from Identity) bool {
-	var count int
+func (q *Limiter) Check(from Identity) (limited bool) {
+	var count int64
 	var err error
 	src := from.UniqueKey()
-	if count, err = q.Patrons.IncrementInt(src, 1); err != nil {
-		q.debugPrint("ratelimit (new): ", src)
-		if err := q.Patrons.Add(src, 1, time.Duration(q.Ruleset.Window)*time.Second); err != nil {
-			q.debugPrint("ratelimit: " + err.Error())
+	count, err = q.Patrons.IncrementInt64(src, 1)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			q.debugPrint("ratelimit (new): ", src)
+			if cacheErr := q.Patrons.Add(src, int64(1), time.Duration(q.Ruleset.Window)*time.Second); cacheErr != nil {
+				q.debugPrint("ratelimit error: " + cacheErr.Error())
+			}
+			return false
 		}
-		return false
+		q.debugPrint("ratelimit error: " + err.Error())
+		return true
 	}
 	if count < q.Ruleset.Burst {
 		return false
 	}
 	if !q.Ruleset.Strict {
-		q.increment()
 		q.debugPrint("ratelimit (limited): ", count, " ", src)
 		return true
 	}
@@ -140,7 +139,7 @@ func (q *Limiter) Check(from Identity) bool {
 // Peek checks an Identities UniqueKey() output against a list of cached strings to determine ratelimitting status without adding to its request count.
 func (q *Limiter) Peek(from Identity) bool {
 	if ct, ok := q.Patrons.Get(from.UniqueKey()); ok {
-		count := ct.(int)
+		count := ct.(int64)
 		if count > q.Ruleset.Burst {
 			return true
 		}
@@ -148,28 +147,12 @@ func (q *Limiter) Peek(from Identity) bool {
 	return false
 }
 
-func (q *Limiter) increment() {
-	if q.count.Load() == nil {
-		q.count.Store(1)
-		return
-	}
-	q.count.Store(q.count.Load().(int) + 1)
-}
-
-// GetGrandTotalRated returns the historic total amount of times we have ever reported something as ratelimited.
-func (q *Limiter) GetGrandTotalRated() int {
-	if q.count.Load() == nil {
-		return 0
-	}
-	return q.count.Load().(int)
-}
-
 func (q *Limiter) debugPrint(a ...interface{}) {
-	q.dmu.RLock()
-	if q.Debug {
-		q.dmu.RUnlock()
+	q.RLock()
+	if q.debug {
+		q.RUnlock()
 		debugChannel <- fmt.Sprint(a...)
 		return
 	}
-	q.dmu.RUnlock()
+	q.RUnlock()
 }
