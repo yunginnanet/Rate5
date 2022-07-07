@@ -13,8 +13,6 @@ const (
 	DefaultBurst = 25
 )
 
-var debugChannel chan string
-
 // Identity is an interface that allows any arbitrary type to be used for a unique key in ratelimit checks when implemented.
 type Identity interface {
 	UniqueKey() string
@@ -31,9 +29,10 @@ type Limiter struct {
 	delivered through a channel. See: DebugChannel() */
 	debug bool
 
-	locker uint32
-	known  map[interface{}]*int64
+	debugChannel chan string
+	known        map[interface{}]*int64
 
+	debugMutex *sync.RWMutex
 	*sync.RWMutex
 }
 

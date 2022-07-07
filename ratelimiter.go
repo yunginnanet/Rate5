@@ -53,31 +53,41 @@ func NewStrictLimiter(window int, burst int) *Limiter {
 
 func newLimiter(policy Policy) *Limiter {
 	return &Limiter{
-		Ruleset: policy,
-		Patrons: cache.New(time.Duration(policy.Window)*time.Second, 5*time.Second),
-		known:   make(map[interface{}]*int64),
-		RWMutex: &sync.RWMutex{},
-		debug:   false,
+		Ruleset:    policy,
+		Patrons:    cache.New(time.Duration(policy.Window)*time.Second, 5*time.Second),
+		known:      make(map[interface{}]*int64),
+		RWMutex:    &sync.RWMutex{},
+		debugMutex: &sync.RWMutex{},
+		debug:      false,
 	}
 }
 
 func (q *Limiter) SetDebug(on bool) {
-	q.Lock()
+	if !on {
+		q.Patrons.OnEvicted(nil)
+	}
+	q.debugMutex.Lock()
 	q.debug = on
-	q.Unlock()
+	q.debugMutex.Unlock()
 }
 
 // DebugChannel enables debug mode and returns a channel where debug messages are sent.
 // NOTE: You must read from this channel if created via this function or it will block
 func (q *Limiter) DebugChannel() chan string {
-	q.Lock()
+	q.debugMutex.RLock()
+	if q.debug {
+		q.debugMutex.RUnlock()
+		return q.debugChannel
+	}
+	q.debugMutex.RUnlock()
+	q.debugMutex.Lock()
+	q.debug = true
+	q.debugChannel = make(chan string, 25)
 	q.Patrons.OnEvicted(func(src string, count interface{}) {
 		q.debugPrint("ratelimit (expired): ", src, " ", count)
 	})
-	q.debug = true
-	debugChannel = make(chan string, 20)
-	q.Unlock()
-	return debugChannel
+	q.debugMutex.Unlock()
+	return q.debugChannel
 }
 
 func intPtr(i int64) *int64 {
@@ -86,16 +96,17 @@ func intPtr(i int64) *int64 {
 
 func (q *Limiter) getHitsPtr(src string) *int64 {
 	q.RLock()
-	defer q.RUnlock()
 	if _, ok := q.known[src]; ok {
-		return q.known[src]
+		oldPtr := q.known[src]
+		q.RUnlock()
+		return oldPtr
 	}
 	q.RUnlock()
 	q.Lock()
-	q.known[src] = intPtr(0)
+	newPtr := intPtr(0)
+	q.known[src] = newPtr
 	q.Unlock()
-	q.RLock()
-	return q.known[src]
+	return newPtr
 }
 
 func (q *Limiter) strictLogic(src string, count int64) {
@@ -128,11 +139,11 @@ func (q *Limiter) Check(from Identity) (limited bool) {
 	if count < q.Ruleset.Burst {
 		return false
 	}
-	if !q.Ruleset.Strict {
+	if q.Ruleset.Strict {
+		q.strictLogic(src, count)
+	} else {
 		q.debugPrint("ratelimit (limited): ", count, " ", src)
-		return true
 	}
-	q.strictLogic(src, count)
 	return true
 }
 
@@ -148,11 +159,12 @@ func (q *Limiter) Peek(from Identity) bool {
 }
 
 func (q *Limiter) debugPrint(a ...interface{}) {
-	q.RLock()
-	if q.debug {
-		q.RUnlock()
-		debugChannel <- fmt.Sprint(a...)
+	q.debugMutex.RLock()
+	defer q.debugMutex.RUnlock()
+	if !q.debug {
 		return
 	}
-	q.RUnlock()
+	go func(msg ...interface{}) {
+		q.debugChannel <- fmt.Sprint(msg...)
+	}(a)
 }
