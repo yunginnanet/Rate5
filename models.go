@@ -20,19 +20,19 @@ type Identity interface {
 
 // Limiter implements an Enforcer to create an arbitrary ratelimiter.
 type Limiter struct {
+	// Source is the implementation of the Identity interface. It is used to create a unique key for each request.
 	Source Identity
-	// Patrons are the IRC users that we are rate limiting.
+	// Patrons gives access to the underlying cache type that powers the ratelimiter.
+	// It is exposed for testing purposes.
 	Patrons *cache.Cache
-	// Ruleset is the actual ratelimitting model.
+	// Ruleset determines the Policy which is used to determine whether or not to ratelimit.
+	// It consists of a Window and Burst, see Policy for more details.
 	Ruleset Policy
-	/* debug mode (toggled here) enables debug messages
-	delivered through a channel. See: DebugChannel() */
-	debug bool
 
+	debug        bool
 	debugChannel chan string
 	known        map[interface{}]*int64
-
-	debugMutex *sync.RWMutex
+	debugMutex   *sync.RWMutex
 	*sync.RWMutex
 }
 

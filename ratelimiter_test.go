@@ -42,9 +42,12 @@ func (rp *randomPatron) GenerateKey() {
 	rp.key = string(buf)
 }
 
+var forCoverage = &sync.Once{}
+
 func watchDebug(r *Limiter, t *testing.T) {
 	t.Logf("debug enabled")
 	rd := r.DebugChannel()
+	forCoverage.Do(func() { rd = r.DebugChannel() })
 	pre := "[Rate5] "
 	for {
 		select {
@@ -60,6 +63,32 @@ type ticker struct{}
 
 func (tick *ticker) UniqueKey() string {
 	return "tick"
+}
+
+func Test_NewDefaultLimiter(t *testing.T) {
+	limiter := NewDefaultLimiter()
+	limiter.Check(dummyTicker)
+	if limiter.Peek(dummyTicker) {
+		t.Errorf("Should not have been limited")
+	}
+	for n := 0; n != DefaultBurst+1; n++ {
+		limiter.Check(dummyTicker)
+	}
+	if !limiter.Peek(dummyTicker) {
+		t.Errorf("Should have been limited")
+	}
+}
+
+func Test_NewLimiter(t *testing.T) {
+	limiter := NewLimiter(5, 1)
+	limiter.Check(dummyTicker)
+	if limiter.Peek(dummyTicker) {
+		t.Errorf("Should not have been limited")
+	}
+	limiter.Check(dummyTicker)
+	if !limiter.Peek(dummyTicker) {
+		t.Errorf("Should have been limited")
+	}
 }
 
 func Test_NewCustomLimiter(t *testing.T) {
@@ -79,14 +108,14 @@ func Test_NewCustomLimiter(t *testing.T) {
 		if ct, ok := limiter.Patrons.Get(dummyTicker.UniqueKey()); ok {
 			t.Errorf("Should not have been limited. Ratelimiter count: %d", ct)
 		} else {
-			t.Errorf("dummyTicker does not exist in ratelimiter at all!")
+			t.Fatalf("dummyTicker does not exist in ratelimiter at all!")
 		}
 	}
 	if !limiter.Check(dummyTicker) {
 		if ct, ok := limiter.Patrons.Get(dummyTicker.UniqueKey()); ok {
 			t.Errorf("Should have been limited. Ratelimiter count: %d", ct)
 		} else {
-			t.Errorf("dummyTicker does not exist in ratelimiter at all!")
+			t.Fatalf("dummyTicker does not exist in ratelimiter at all!")
 		}
 	}
 
@@ -110,7 +139,7 @@ func Test_NewDefaultStrictLimiter(t *testing.T) {
 		if ct, ok := limiter.Patrons.Get(dummyTicker.UniqueKey()); ok {
 			t.Errorf("Should not have been limited. Ratelimiter count: %d", ct)
 		} else {
-			t.Errorf("dummyTicker does not exist in ratelimiter at all!")
+			t.Fatalf("dummyTicker does not exist in ratelimiter at all!")
 		}
 	}
 	if !limiter.Check(dummyTicker) {
@@ -125,8 +154,26 @@ func Test_NewDefaultStrictLimiter(t *testing.T) {
 	limiter = nil
 }
 
-func concurrentTest(t *testing.T, jobs int, iterCount int, burst int64, shouldLimit bool) { //nolint:funlen
-	// runtime.GC()
+func Test_NewStrictLimiter(t *testing.T) {
+	limiter := NewStrictLimiter(5, 1)
+	limiter.Check(dummyTicker)
+	if limiter.Peek(dummyTicker) {
+		t.Errorf("Should not have been limited")
+	}
+	limiter.Check(dummyTicker)
+	if !limiter.Peek(dummyTicker) {
+		t.Errorf("Should have been limited")
+	}
+	limiter.Check(dummyTicker)
+	// for coverage
+	exp := limiter.DebugChannel()
+	<-exp
+	if limiter.Peek(dummyTicker) {
+		t.Errorf("Should not have been limited")
+	}
+}
+
+func concurrentTest(t *testing.T, jobs int, iterCount int, burst int64, shouldLimit bool) {
 	var randos map[int]*randomPatron
 	randos = make(map[int]*randomPatron)
 

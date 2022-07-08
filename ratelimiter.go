@@ -2,7 +2,6 @@ package rate5
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -10,7 +9,9 @@ import (
 	"github.com/patrickmn/go-cache"
 )
 
-// NewDefaultLimiter returns a ratelimiter with default settings without Strict mode.
+/*NewDefaultLimiter returns a ratelimiter with default settings without Strict mode.
+ * Default window: 25 seconds
+ * Default burst: 25 requests */
 func NewDefaultLimiter() *Limiter {
 	return newLimiter(Policy{
 		Window: DefaultWindow,
@@ -24,7 +25,9 @@ func NewCustomLimiter(policy Policy) *Limiter {
 	return newLimiter(policy)
 }
 
-// NewLimiter returns a custom limiter witout Strict mode
+/*NewLimiter returns a custom limiter witout Strict mode.
+ * Window is the time in seconds that the limiter will cache requests.
+ * Burst is the number of requests that can be made in the window.*/
 func NewLimiter(window int, burst int) *Limiter {
 	return newLimiter(Policy{
 		Window: int64(window),
@@ -33,7 +36,9 @@ func NewLimiter(window int, burst int) *Limiter {
 	})
 }
 
-// NewDefaultStrictLimiter returns a ratelimiter with default settings with Strict mode.
+/*NewDefaultStrictLimiter returns a ratelimiter with default settings with Strict mode.
+ * Default window: 25 seconds
+ * Default burst: 25 requests */
 func NewDefaultStrictLimiter() *Limiter {
 	return newLimiter(Policy{
 		Window: DefaultWindow,
@@ -42,7 +47,9 @@ func NewDefaultStrictLimiter() *Limiter {
 	})
 }
 
-// NewStrictLimiter returns a custom limiter with Strict mode.
+/*NewStrictLimiter returns a custom limiter with Strict mode.
+ * Window is the time in seconds that the limiter will cache requests.
+ * Burst is the number of requests that can be made in the window.*/
 func NewStrictLimiter(window int, burst int) *Limiter {
 	return newLimiter(Policy{
 		Window: int64(window),
@@ -113,9 +120,7 @@ func (q *Limiter) strictLogic(src string, count int64) {
 	knownHits := q.getHitsPtr(src)
 	atomic.AddInt64(knownHits, 1)
 	extwindow := q.Ruleset.Window + atomic.LoadInt64(knownHits)
-	if err := q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second); err != nil {
-		q.debugPrint("ratelimit (strict) error: " + err.Error())
-	}
+	_ = q.Patrons.Replace(src, count, time.Duration(extwindow)*time.Second)
 	q.debugPrint("ratelimit (strict) limited: ", count, " ", src)
 }
 
@@ -126,15 +131,11 @@ func (q *Limiter) Check(from Identity) (limited bool) {
 	src := from.UniqueKey()
 	count, err = q.Patrons.IncrementInt64(src, 1)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			q.debugPrint("ratelimit (new): ", src)
-			if cacheErr := q.Patrons.Add(src, int64(1), time.Duration(q.Ruleset.Window)*time.Second); cacheErr != nil {
-				q.debugPrint("ratelimit error: " + cacheErr.Error())
-			}
-			return false
-		}
-		q.debugPrint("ratelimit error: " + err.Error())
-		return true
+		// IncrementInt64 should only error if the value is not an int64, so we can assume it's a new key.
+		q.debugPrint("ratelimit (new): ", src)
+		// We can't reproduce this throwing an error, we can only assume that the key is new.
+		_ = q.Patrons.Add(src, int64(1), time.Duration(q.Ruleset.Window)*time.Second)
+		return false
 	}
 	if count < q.Ruleset.Burst {
 		return false
