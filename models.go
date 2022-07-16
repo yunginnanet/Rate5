@@ -42,6 +42,9 @@ type Policy struct {
 	Window int64
 	// Burst is the amount of times that Check will not trigger a limit within the duration defined by Window.
 	Burst int64
-	// Strict mode punishes triggers of the ratelimitby increasing the amount of time they have to wait every time they trigger the limitter.
+	// Strict mode punishes triggers of the ratelimitter by increasing the wait time upon every trigger of the limiter.
 	Strict bool
+	// Hardcore mode implies strict mode but instead of using addition when adding to the wait time, it uses multiplication.
+	// This will cause exponential ratelimiting.
+	Hardcore bool
 }

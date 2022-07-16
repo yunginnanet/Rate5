@@ -1,6 +1,7 @@
 package rate5
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"runtime"
@@ -11,7 +12,6 @@ import (
 
 var (
 	dummyTicker *ticker
-	stopDebug   = make(chan bool)
 )
 
 type randomPatron struct {
@@ -42,153 +42,202 @@ func (rp *randomPatron) GenerateKey() {
 	rp.key = string(buf)
 }
 
-var forCoverage = &sync.Once{}
+var (
+	forCoverage     = &sync.Once{}
+	watchDebugMutex = &sync.Mutex{}
+)
 
-func watchDebug(r *Limiter, t *testing.T) {
-	t.Logf("debug enabled")
+func watchDebug(ctx context.Context, r *Limiter, t *testing.T) {
+	t.Helper()
+	watchDebugMutex.Lock()
+	defer watchDebugMutex.Unlock()
 	rd := r.DebugChannel()
-	forCoverage.Do(func() { rd = r.DebugChannel() })
-	pre := "[Rate5] "
+	forCoverage.Do(func() {
+		r.SetDebug(true)
+		rd = r.DebugChannel()
+	})
 	for {
 		select {
-		case msg := <-rd:
-			t.Logf("%s Limit: %s \n", pre, msg)
-		case <-stopDebug:
+		case <-ctx.Done():
+			r = nil
 			return
+		case msg := <-rd:
+			t.Logf("%s \n", msg)
+		default:
 		}
+	}
+}
+
+func peekCheckLimited(t *testing.T, limiter *Limiter, shouldbe bool) {
+	t.Helper()
+	switch {
+	case limiter.Peek(dummyTicker) && !shouldbe:
+		if ct, ok := limiter.Patrons.Get(dummyTicker.UniqueKey()); ok {
+			t.Errorf("Should not have been limited. Ratelimiter count: %d", ct)
+		} else {
+			t.Fatalf("dummyTicker does not exist in ratelimiter at all!")
+		}
+	case !limiter.Peek(dummyTicker) && shouldbe:
+		if ct, ok := limiter.Patrons.Get(dummyTicker.UniqueKey()); ok {
+			t.Errorf("Should have been limited. Ratelimiter count: %d", ct)
+		} else {
+			t.Fatalf("dummyTicker does not exist in ratelimiter at all!")
+		}
+	case limiter.Peek(dummyTicker) && shouldbe:
+		t.Logf("dummyTicker is limited")
+	case !limiter.Peek(dummyTicker) && !shouldbe:
+		t.Logf("dummyTicker is not limited")
+	}
+}
+
+// this test exists here for coverage, we are simulating the debug channel overflowing and then invoking println().
+func Test_debugPrintf(t *testing.T) {
+	limiter := NewLimiter(1, 1)
+	_ = limiter.DebugChannel()
+	for n := 0; n < 50; n++ {
+		limiter.Check(dummyTicker)
 	}
 }
 
 type ticker struct{}
 
 func (tick *ticker) UniqueKey() string {
-	return "tick"
+	return "TestItem"
+}
+
+func Test_ResetItem(t *testing.T) {
+	limiter := NewLimiter(500, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	go watchDebug(ctx, limiter, t)
+	time.Sleep(25 * time.Millisecond)
+	for n := 0; n < 10; n++ {
+		limiter.Check(dummyTicker)
+	}
+	limiter.ResetItem(dummyTicker)
+	peekCheckLimited(t, limiter, false)
+	cancel()
 }
 
 func Test_NewDefaultLimiter(t *testing.T) {
 	limiter := NewDefaultLimiter()
 	limiter.Check(dummyTicker)
-	if limiter.Peek(dummyTicker) {
-		t.Errorf("Should not have been limited")
-	}
-	for n := 0; n != DefaultBurst+1; n++ {
+	peekCheckLimited(t, limiter, false)
+	for n := 0; n != DefaultBurst; n++ {
 		limiter.Check(dummyTicker)
 	}
-	if !limiter.Peek(dummyTicker) {
-		t.Errorf("Should have been limited")
-	}
+	peekCheckLimited(t, limiter, true)
 }
 
 func Test_NewLimiter(t *testing.T) {
 	limiter := NewLimiter(5, 1)
 	limiter.Check(dummyTicker)
-	if limiter.Peek(dummyTicker) {
-		t.Errorf("Should not have been limited")
-	}
+	peekCheckLimited(t, limiter, false)
 	limiter.Check(dummyTicker)
-	if !limiter.Peek(dummyTicker) {
-		t.Errorf("Should have been limited")
-	}
-}
-
-func Test_NewCustomLimiter(t *testing.T) {
-	limiter := NewCustomLimiter(Policy{
-		Window: 5,
-		Burst:  10,
-		Strict: false,
-	})
-
-	go watchDebug(limiter, t)
-	time.Sleep(25 * time.Millisecond)
-
-	for n := 0; n < 9; n++ {
-		limiter.Check(dummyTicker)
-	}
-	if limiter.Peek(dummyTicker) {
-		if ct, ok := limiter.Patrons.Get(dummyTicker.UniqueKey()); ok {
-			t.Errorf("Should not have been limited. Ratelimiter count: %d", ct)
-		} else {
-			t.Fatalf("dummyTicker does not exist in ratelimiter at all!")
-		}
-	}
-	if !limiter.Check(dummyTicker) {
-		if ct, ok := limiter.Patrons.Get(dummyTicker.UniqueKey()); ok {
-			t.Errorf("Should have been limited. Ratelimiter count: %d", ct)
-		} else {
-			t.Fatalf("dummyTicker does not exist in ratelimiter at all!")
-		}
-	}
-
-	stopDebug <- true
-	limiter = nil
+	peekCheckLimited(t, limiter, true)
 }
 
 func Test_NewDefaultStrictLimiter(t *testing.T) {
-	// DefaultBurst = 25
-	// DefaultWindow = 5
 	limiter := NewDefaultStrictLimiter()
-
-	go watchDebug(limiter, t)
+	ctx, cancel := context.WithCancel(context.Background())
+	go watchDebug(ctx, limiter, t)
 	time.Sleep(25 * time.Millisecond)
-
-	for n := 0; n < 24; n++ {
+	for n := 0; n < 25; n++ {
 		limiter.Check(dummyTicker)
 	}
-
-	if limiter.Peek(dummyTicker) {
-		if ct, ok := limiter.Patrons.Get(dummyTicker.UniqueKey()); ok {
-			t.Errorf("Should not have been limited. Ratelimiter count: %d", ct)
-		} else {
-			t.Fatalf("dummyTicker does not exist in ratelimiter at all!")
-		}
-	}
-	if !limiter.Check(dummyTicker) {
-		if ct, ok := limiter.Patrons.Get(dummyTicker.UniqueKey()); ok {
-			t.Errorf("Should have been limited. Ratelimiter count: %d, policy: %d", ct, limiter.Ruleset.Burst)
-		} else {
-			t.Errorf("dummyTicker does not exist in ratelimiter at all!")
-		}
-	}
-
-	stopDebug <- true
+	peekCheckLimited(t, limiter, false)
+	limiter.Check(dummyTicker)
+	peekCheckLimited(t, limiter, true)
+	cancel()
 	limiter = nil
 }
 
 func Test_NewStrictLimiter(t *testing.T) {
 	limiter := NewStrictLimiter(5, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	go watchDebug(ctx, limiter, t)
 	limiter.Check(dummyTicker)
-	if limiter.Peek(dummyTicker) {
-		t.Errorf("Should not have been limited")
+	peekCheckLimited(t, limiter, false)
+	limiter.Check(dummyTicker)
+	peekCheckLimited(t, limiter, true)
+	limiter.Check(dummyTicker)
+	// for coverage, first we give the debug messages a couple seconds to be safe,
+	// then we wait for the cache eviction to trigger a debug message.
+	time.Sleep(2 * time.Second)
+	t.Logf(<-limiter.DebugChannel())
+	peekCheckLimited(t, limiter, false)
+	for n := 0; n != 6; n++ {
+		limiter.Check(dummyTicker)
 	}
-	limiter.Check(dummyTicker)
-	if !limiter.Peek(dummyTicker) {
+	peekCheckLimited(t, limiter, true)
+	time.Sleep(5 * time.Second)
+	peekCheckLimited(t, limiter, true)
+	time.Sleep(8 * time.Second)
+	peekCheckLimited(t, limiter, false)
+	cancel()
+	limiter = nil
+}
+
+func Test_NewHardcoreLimiter(t *testing.T) {
+	limiter := NewHardcoreLimiter(1, 5)
+	ctx, cancel := context.WithCancel(context.Background())
+	go watchDebug(ctx, limiter, t)
+	for n := 0; n != 4; n++ {
+		limiter.Check(dummyTicker)
+	}
+	peekCheckLimited(t, limiter, false)
+	if !limiter.Check(dummyTicker) {
+		t.Errorf("Should have been limited")
+	}
+	t.Logf("limited once, waiting for cache eviction")
+	time.Sleep(2 * time.Second)
+	peekCheckLimited(t, limiter, false)
+	for n := 0; n != 4; n++ {
+		limiter.Check(dummyTicker)
+	}
+	peekCheckLimited(t, limiter, false)
+	if !limiter.Check(dummyTicker) {
 		t.Errorf("Should have been limited")
 	}
 	limiter.Check(dummyTicker)
-	// for coverage
-	exp := limiter.DebugChannel()
-	<-exp
-	if limiter.Peek(dummyTicker) {
-		t.Errorf("Should not have been limited")
+	limiter.Check(dummyTicker)
+	time.Sleep(3 * time.Second)
+	peekCheckLimited(t, limiter, true)
+	time.Sleep(5 * time.Second)
+	peekCheckLimited(t, limiter, false)
+	for n := 0; n != 4; n++ {
+		limiter.Check(dummyTicker)
 	}
+	peekCheckLimited(t, limiter, false)
+	for n := 0; n != 10; n++ {
+		limiter.Check(dummyTicker)
+	}
+	time.Sleep(10 * time.Second)
+	peekCheckLimited(t, limiter, true)
+	cancel()
+	// for coverage, triggering the switch statement case for hardcore logic
+	limiter2 := NewHardcoreLimiter(2, 5)
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	go watchDebug(ctx2, limiter2, t)
+	for n := 0; n != 6; n++ {
+		limiter2.Check(dummyTicker)
+	}
+	peekCheckLimited(t, limiter2, true)
+	time.Sleep(4 * time.Second)
+	peekCheckLimited(t, limiter2, false)
+	cancel2()
 }
 
-func concurrentTest(t *testing.T, jobs int, iterCount int, burst int64, shouldLimit bool) {
+func concurrentTest(t *testing.T, jobs int, iterCount int, burst int64, shouldLimit bool) { //nolint:funlen
 	var randos map[int]*randomPatron
 	randos = make(map[int]*randomPatron)
-
 	limiter := NewCustomLimiter(Policy{
 		Window: 240,
 		Burst:  burst,
 		Strict: true,
 	})
-
 	limitNotice := sync.Once{}
-
 	limiter.SetDebug(false)
-
 	usedkeys := make(map[string]interface{})
-
 	for n := 0; n != jobs; n++ {
 		randos[n] = new(randomPatron)
 		ok := true
@@ -200,7 +249,6 @@ func concurrentTest(t *testing.T, jobs int, iterCount int, burst int64, shouldLi
 			}
 		}
 	}
-
 	t.Logf("generated %d Patrons with unique keys, running Check() with them %d times concurrently with a burst limit of %d...",
 		len(randos), iterCount, burst)
 
@@ -220,7 +268,6 @@ func concurrentTest(t *testing.T, jobs int, iterCount int, burst int64, shouldLi
 			}
 		}(rp)
 	}
-
 testloop:
 	for {
 		select {
