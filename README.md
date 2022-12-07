@@ -12,7 +12,7 @@ import rate5 "github.com/yunginnanet/rate5"
 
 var Rater *rate5.Limiter
 
-[...]
+// [...]
 type Client struct {
         ID   string
         Conn net.Conn
