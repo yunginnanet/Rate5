@@ -1,6 +1,7 @@
 package rate5
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,10 +58,12 @@ func NewStrictLimiter(window int, burst int) *Limiter {
 	})
 }
 
-/*NewHardcoreLimiter returns a custom limiter with Strict + Hardcore modes enabled.
+/*
+NewHardcoreLimiter returns a custom limiter with Strict + Hardcore modes enabled.
 
 Hardcore mode causes the time limited to be multiplied by the number of hits.
-This differs from strict mode which is only using addition instead of multiplication.*/
+This differs from strict mode which is only using addition instead of multiplication.
+*/
 func NewHardcoreLimiter(window int, burst int) *Limiter {
 	l := NewStrictLimiter(window, burst)
 	l.Ruleset.Hardcore = true
@@ -80,7 +83,7 @@ func newLimiter(policy Policy) *Limiter {
 		known:      make(map[interface{}]*int64),
 		RWMutex:    &sync.RWMutex{},
 		debugMutex: &sync.RWMutex{},
-		debug:      false,
+		debug:      DebugDisabled,
 	}
 }
 
@@ -122,6 +125,11 @@ func (q *Limiter) strictLogic(src string, count int64) {
 	q.debugPrintf("%s ratelimit for %s: last count %d. time: %s", prefix, src, count, exttime)
 }
 
+func (q *Limiter) CheckStringer(from fmt.Stringer) bool {
+	targ := IdentityStringer{stringer: from}
+	return q.Check(targ)
+}
+
 // Check checks and increments an Identities UniqueKey() output against a list of cached strings to determine and raise it's ratelimitting status.
 func (q *Limiter) Check(from Identity) (limited bool) {
 	var count int64
@@ -158,4 +166,9 @@ func (q *Limiter) Peek(from Identity) bool {
 		}
 	}
 	return false
+}
+
+func (q *Limiter) PeekStringer(from fmt.Stringer) bool {
+	targ := IdentityStringer{stringer: from}
+	return q.Peek(targ)
 }

@@ -48,7 +48,6 @@ var (
 )
 
 func watchDebug(ctx context.Context, r *Limiter, t *testing.T) {
-	t.Helper()
 	watchDebugMutex.Lock()
 	defer watchDebugMutex.Unlock()
 	rd := r.DebugChannel()
@@ -68,25 +67,28 @@ func watchDebug(ctx context.Context, r *Limiter, t *testing.T) {
 	}
 }
 
-func peekCheckLimited(t *testing.T, limiter *Limiter, shouldbe bool) {
-	t.Helper()
+func peekCheckLimited(t *testing.T, limiter *Limiter, shouldbe, stringer bool) {
+	limited := limiter.Peek(dummyTicker)
+	if stringer {
+		limited = limiter.PeekStringer(dummyTicker)
+	}
 	switch {
-	case limiter.Peek(dummyTicker) && !shouldbe:
+	case limited && !shouldbe:
 		if ct, ok := limiter.Patrons.Get(dummyTicker.UniqueKey()); ok {
 			t.Errorf("Should not have been limited. Ratelimiter count: %d", ct)
 		} else {
 			t.Fatalf("dummyTicker does not exist in ratelimiter at all!")
 		}
-	case !limiter.Peek(dummyTicker) && shouldbe:
+	case !limited && shouldbe:
 		if ct, ok := limiter.Patrons.Get(dummyTicker.UniqueKey()); ok {
 			t.Errorf("Should have been limited. Ratelimiter count: %d", ct)
 		} else {
 			t.Fatalf("dummyTicker does not exist in ratelimiter at all!")
 		}
-	case limiter.Peek(dummyTicker) && shouldbe:
-		t.Logf("dummyTicker is limited")
-	case !limiter.Peek(dummyTicker) && !shouldbe:
-		t.Logf("dummyTicker is not limited")
+	case limited && shouldbe:
+		t.Logf("dummyTicker is limited as expected.")
+	case !limited && !shouldbe:
+		t.Logf("dummyTicker is not limited as expected.")
 	}
 }
 
@@ -105,6 +107,10 @@ func (tick *ticker) UniqueKey() string {
 	return "TestItem"
 }
 
+func (tick *ticker) String() string {
+	return "TestItem"
+}
+
 func Test_ResetItem(t *testing.T) {
 	limiter := NewLimiter(500, 1)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -114,26 +120,36 @@ func Test_ResetItem(t *testing.T) {
 		limiter.Check(dummyTicker)
 	}
 	limiter.ResetItem(dummyTicker)
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	cancel()
 }
 
 func Test_NewDefaultLimiter(t *testing.T) {
 	limiter := NewDefaultLimiter()
 	limiter.Check(dummyTicker)
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	for n := 0; n != DefaultBurst; n++ {
 		limiter.Check(dummyTicker)
 	}
-	peekCheckLimited(t, limiter, true)
+	peekCheckLimited(t, limiter, true, false)
+}
+
+func Test_CheckAndPeekStringer(t *testing.T) {
+	limiter := NewDefaultLimiter()
+	limiter.CheckStringer(dummyTicker)
+	peekCheckLimited(t, limiter, false, true)
+	for n := 0; n != DefaultBurst; n++ {
+		limiter.CheckStringer(dummyTicker)
+	}
+	peekCheckLimited(t, limiter, true, true)
 }
 
 func Test_NewLimiter(t *testing.T) {
 	limiter := NewLimiter(5, 1)
 	limiter.Check(dummyTicker)
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	limiter.Check(dummyTicker)
-	peekCheckLimited(t, limiter, true)
+	peekCheckLimited(t, limiter, true, false)
 }
 
 func Test_NewDefaultStrictLimiter(t *testing.T) {
@@ -144,9 +160,9 @@ func Test_NewDefaultStrictLimiter(t *testing.T) {
 	for n := 0; n < 25; n++ {
 		limiter.Check(dummyTicker)
 	}
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	limiter.Check(dummyTicker)
-	peekCheckLimited(t, limiter, true)
+	peekCheckLimited(t, limiter, true, false)
 	cancel()
 	limiter = nil
 }
@@ -156,23 +172,23 @@ func Test_NewStrictLimiter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go watchDebug(ctx, limiter, t)
 	limiter.Check(dummyTicker)
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	limiter.Check(dummyTicker)
-	peekCheckLimited(t, limiter, true)
+	peekCheckLimited(t, limiter, true, false)
 	limiter.Check(dummyTicker)
 	// for coverage, first we give the debug messages a couple seconds to be safe,
 	// then we wait for the cache eviction to trigger a debug message.
 	time.Sleep(2 * time.Second)
 	t.Logf(<-limiter.DebugChannel())
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	for n := 0; n != 6; n++ {
 		limiter.Check(dummyTicker)
 	}
-	peekCheckLimited(t, limiter, true)
+	peekCheckLimited(t, limiter, true, false)
 	time.Sleep(5 * time.Second)
-	peekCheckLimited(t, limiter, true)
+	peekCheckLimited(t, limiter, true, false)
 	time.Sleep(8 * time.Second)
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	cancel()
 	limiter = nil
 }
@@ -184,35 +200,35 @@ func Test_NewHardcoreLimiter(t *testing.T) {
 	for n := 0; n != 4; n++ {
 		limiter.Check(dummyTicker)
 	}
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	if !limiter.Check(dummyTicker) {
 		t.Errorf("Should have been limited")
 	}
 	t.Logf("limited once, waiting for cache eviction")
 	time.Sleep(2 * time.Second)
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	for n := 0; n != 4; n++ {
 		limiter.Check(dummyTicker)
 	}
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	if !limiter.Check(dummyTicker) {
 		t.Errorf("Should have been limited")
 	}
 	limiter.Check(dummyTicker)
 	limiter.Check(dummyTicker)
 	time.Sleep(3 * time.Second)
-	peekCheckLimited(t, limiter, true)
+	peekCheckLimited(t, limiter, true, false)
 	time.Sleep(5 * time.Second)
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	for n := 0; n != 4; n++ {
 		limiter.Check(dummyTicker)
 	}
-	peekCheckLimited(t, limiter, false)
+	peekCheckLimited(t, limiter, false, false)
 	for n := 0; n != 10; n++ {
 		limiter.Check(dummyTicker)
 	}
 	time.Sleep(10 * time.Second)
-	peekCheckLimited(t, limiter, true)
+	peekCheckLimited(t, limiter, true, false)
 	cancel()
 	// for coverage, triggering the switch statement case for hardcore logic
 	limiter2 := NewHardcoreLimiter(2, 5)
@@ -221,9 +237,9 @@ func Test_NewHardcoreLimiter(t *testing.T) {
 	for n := 0; n != 6; n++ {
 		limiter2.Check(dummyTicker)
 	}
-	peekCheckLimited(t, limiter2, true)
+	peekCheckLimited(t, limiter2, true, false)
 	time.Sleep(4 * time.Second)
-	peekCheckLimited(t, limiter2, false)
+	peekCheckLimited(t, limiter2, false, false)
 	cancel2()
 }
 
@@ -313,4 +329,19 @@ func Test_ConcurrentShouldNotLimit(t *testing.T) {
 func Test_ConcurrentShouldLimit(t *testing.T) {
 	concurrentTest(t, 50, 21, 20, true)
 	concurrentTest(t, 50, 51, 50, true)
+}
+
+func Test_debugChannelOverflow(t *testing.T) {
+	limiter := NewDefaultLimiter()
+	_ = limiter.DebugChannel()
+	for n := 0; n != 78; n++ {
+		limiter.Check(dummyTicker)
+		if limiter.debugLost > 0 {
+			t.Fatalf("debug channel overflowed")
+		}
+	}
+	limiter.Check(dummyTicker)
+	if limiter.debugLost == 0 {
+		t.Fatalf("debug channel did not overflow")
+	}
 }
