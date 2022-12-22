@@ -28,8 +28,9 @@ func (q *Limiter) setDebugEvict() {
 func (q *Limiter) SetDebug(on bool) {
 	switch on {
 	case true:
-		atomic.CompareAndSwapUint32(&q.debug, DebugDisabled, DebugEnabled)
-		q.debugPrintf("rate5 debug enabled")
+		if atomic.CompareAndSwapUint32(&q.debug, DebugDisabled, DebugEnabled) {
+			q.debugPrintf("rate5 debug enabled")
+		}
 	case false:
 		atomic.CompareAndSwapUint32(&q.debug, DebugEnabled, DebugDisabled)
 	}
