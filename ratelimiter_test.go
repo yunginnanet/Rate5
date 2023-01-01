@@ -52,6 +52,7 @@ func watchDebug(ctx context.Context, r *Limiter, t *testing.T) {
 	defer watchDebugMutex.Unlock()
 	rd := r.DebugChannel()
 	forCoverage.Do(func() {
+		r.SetDebug(false)
 		r.SetDebug(true)
 		rd = r.DebugChannel()
 	})
