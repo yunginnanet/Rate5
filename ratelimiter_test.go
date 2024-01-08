@@ -87,9 +87,9 @@ func peekCheckLimited(t *testing.T, limiter *Limiter, shouldbe, stringer bool) {
 			t.Fatalf("dummyTicker does not exist in ratelimiter at all!")
 		}
 	case limited && shouldbe:
-		t.Logf("dummyTicker is limited as expected.")
+		t.Logf("dummyTicker is limited (pass).")
 	case !limited && !shouldbe:
-		t.Logf("dummyTicker is not limited as expected.")
+		t.Logf("dummyTicker is not limited (pass).")
 	}
 }
 
