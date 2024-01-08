@@ -79,7 +79,7 @@ func newLimiter(policy Policy) *Limiter {
 	window := time.Duration(policy.Window) * time.Second
 	return &Limiter{
 		Ruleset:    policy,
-		Patrons:    cache.New(window, 1*time.Second),
+		Patrons:    cache.New(window, time.Duration(policy.Window)*time.Second),
 		known:      make(map[interface{}]*int64),
 		RWMutex:    &sync.RWMutex{},
 		debugMutex: &sync.RWMutex{},
@@ -135,7 +135,6 @@ func (q *Limiter) Check(from Identity) (limited bool) {
 	var count int64
 	var err error
 	src := from.UniqueKey()
-	q.Patrons.DeleteExpired()
 	count, err = q.Patrons.IncrementInt64(src, 1)
 	if err != nil {
 		// IncrementInt64 should only error if the value is not an int64, so we can assume it's a new key.
