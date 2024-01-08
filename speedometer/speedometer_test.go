@@ -282,7 +282,7 @@ func Test_Speedometer(t *testing.T) {
 		}
 	})
 
-	t.Run("SynSynAckAck", func(t *testing.T) {
+	t.Run("limited TCP bandwidth", func(t *testing.T) {
 		t.Parallel()
 		var (
 			server net.Listener
@@ -348,7 +348,7 @@ func Test_Speedometer(t *testing.T) {
 				case n != len(buf):
 					t.Errorf("Failed to write all bytes: %d", n)
 				default:
-					t.Logf("Wrote %d bytes", n)
+					t.Logf("Wrote %d bytes (rate: %v/bps)", n, speedometer.Rate())
 				}
 			}
 		}()
