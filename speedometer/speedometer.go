@@ -1,4 +1,4 @@
-package util
+package speedometer
 
 import (
 	"errors"
@@ -176,7 +176,7 @@ func (s *Speedometer) Close() error {
 	return s.internal.slow.Load()
 }*/
 
-// Rate returns the rate at which data is being written to the underlying writer per second.
+// Rate returns the bytes per second rate at which data is being written to the underlying writer.
 func (s *Speedometer) Rate() float64 {
 	if s.internal.closed.Load() {
 		return float64(s.Total()) / s.internal.duration.Load().Seconds()
