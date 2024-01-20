@@ -34,7 +34,6 @@ type atomics struct {
 	stop     *sync.Once
 	birth    *atomic.Pointer[time.Time]
 	duration *atomic.Pointer[time.Duration]
-	slow     *atomic.Bool
 }
 
 func newAtomics() atomics {
@@ -45,7 +44,6 @@ func newAtomics() atomics {
 		stop:     new(sync.Once),
 		birth:    new(atomic.Pointer[time.Time]),
 		duration: new(atomic.Pointer[time.Duration]),
-		slow:     new(atomic.Bool),
 	}
 	manhattan.birth.Store(&time.Time{})
 	manhattan.closed.Store(false)
@@ -198,11 +196,12 @@ func (s *Speedometer) slowDown() error {
 		//
 	}
 
-	s.internal.slow.Store(true)
+	// the slowing will continue until morale improves
+	// (sleep until our overall rate re-enters acceptable threshhold)
 	for s.Rate() > float64(s.speedLimit.Burst)/s.speedLimit.Frame.Seconds() {
 		time.Sleep(s.speedLimit.Delay)
 	}
-	s.internal.slow.Store(false)
+
 	return nil
 }
 
