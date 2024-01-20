@@ -183,16 +183,21 @@ func (s *Speedometer) Rate() float64 {
 func (s *Speedometer) slowDown() error {
 	switch {
 	case s.speedLimit == nil:
+		// welcome to the autobahn, motherfucker.
 		return nil
 	case s.speedLimit.Burst <= 0 || s.speedLimit.Frame <= 0,
 		s.speedLimit.CheckEveryBytes <= 0, s.speedLimit.Delay <= 0:
+		// invalid speedLimit
 		return errors.New("invalid speed limit")
+	case s.Total()%int64(s.speedLimit.CheckEveryBytes) != 0:
+		// if (total written [modulus] checkeverybytes is not 0) then our total byte count
+		// is not a multiple of our configured check frequency.
+		// bypass check and write at normal speed
+		return nil
 	default:
 		//
 	}
-	if s.Total()%int64(s.speedLimit.CheckEveryBytes) != 0 {
-		return nil
-	}
+
 	s.internal.slow.Store(true)
 	for s.Rate() > float64(s.speedLimit.Burst)/s.speedLimit.Frame.Seconds() {
 		time.Sleep(s.speedLimit.Delay)
