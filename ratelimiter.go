@@ -106,7 +106,7 @@ func (q *Limiter) getHitsPtr(src string) *int64 {
 	return newPtr
 }
 
-func (q *Limiter) strictLogic(src string, count int64) {
+func (q *Limiter) strictLogic(src string, count *atomic.Int64) {
 	knownHits := q.getHitsPtr(src)
 	atomic.AddInt64(knownHits, 1)
 	var extwindow int64
@@ -132,26 +132,31 @@ func (q *Limiter) CheckStringer(from fmt.Stringer) bool {
 
 // Check checks and increments an Identities UniqueKey() output against a list of cached strings to determine and raise it's ratelimitting status.
 func (q *Limiter) Check(from Identity) (limited bool) {
+	var aval any
 	var count int64
-	var err error
-	src := from.UniqueKey()
-	count, err = q.Patrons.IncrementInt64(src, 1)
-	if err != nil {
-		// IncrementInt64 should only error if the value is not an int64, so we can assume it's a new key.
-		q.debugPrintf("ratelimit %s (new) ", src)
+	var ok bool
+	aval, ok = q.Patrons.Get(from.UniqueKey())
+	switch {
+	case !ok:
+		q.debugPrintf("ratelimit %s (new) ", from.UniqueKey())
+		aval = &atomic.Int64{}
+		aval.(*atomic.Int64).Store(1)
 		// We can't reproduce this throwing an error, we can only assume that the key is new.
-		_ = q.Patrons.Add(src, int64(1), time.Duration(q.Ruleset.Window)*time.Second)
+		_ = q.Patrons.Add(from.UniqueKey(), aval, time.Duration(q.Ruleset.Window)*time.Second)
 		return false
-	}
-	if count < q.Ruleset.Burst {
-		return false
+	case ok && aval != nil:
+		count = aval.(*atomic.Int64).Add(1)
+		_ = q.Patrons.Replace(from.UniqueKey(), aval, time.Duration(q.Ruleset.Window)*time.Second)
+		if count < q.Ruleset.Burst {
+			return false
+		}
 	}
 	if q.Ruleset.Strict {
-		q.strictLogic(src, count)
-	} else {
-		q.debugPrintf("ratelimit %s: last count %d. time: %s",
-			src, count, time.Duration(q.Ruleset.Window)*time.Second)
+		q.strictLogic(from.UniqueKey(), aval.(*atomic.Int64))
+		return true
 	}
+	q.debugPrintf("ratelimit %s: last count %d. time: %s",
+		from.UniqueKey(), count, time.Duration(q.Ruleset.Window)*time.Second)
 	return true
 }
 
