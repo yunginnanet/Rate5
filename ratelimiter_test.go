@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -305,7 +306,7 @@ testloop:
 		if ci, ok = limiter.Patrons.Get(rp.UniqueKey()); !ok {
 			t.Fatal("randomPatron does not exist in ratelimiter at all!")
 		}
-		ct := ci.(int64)
+		ct := ci.(*atomic.Int64).Load()
 		if limiter.Peek(rp) && !shouldLimit {
 			t.Logf("(%d goroutines running)", runtime.NumGoroutine())
 			// runtime.Breakpoint()
