@@ -346,3 +346,101 @@ func Test_debugChannelOverflow(t *testing.T) {
 		t.Fatalf("debug channel did not overflow")
 	}
 }
+
+func BenchmarkCheck(b *testing.B) {
+	b.StopTimer()
+	b.ReportAllocs()
+	limiter := NewDefaultLimiter()
+	b.StartTimer()
+	for n := 0; n < b.N; n++ {
+		limiter.Check(dummyTicker)
+	}
+}
+
+func BenchmarkCheckHardcore(b *testing.B) {
+	b.StopTimer()
+	b.ReportAllocs()
+	limiter := NewHardcoreLimiter(25, 25)
+	b.StartTimer()
+	for n := 0; n < b.N; n++ {
+		limiter.Check(dummyTicker)
+	}
+}
+
+func BenchmarkCheckStrict(b *testing.B) {
+	b.StopTimer()
+	b.ReportAllocs()
+	limiter := NewStrictLimiter(25, 25)
+	b.StartTimer()
+	for n := 0; n < b.N; n++ {
+		limiter.Check(dummyTicker)
+	}
+}
+
+func BenchmarkCheckStringer(b *testing.B) {
+	b.StopTimer()
+	b.ReportAllocs()
+	limiter := NewDefaultLimiter()
+	b.StartTimer()
+	for n := 0; n < b.N; n++ {
+		limiter.CheckStringer(dummyTicker)
+	}
+}
+
+func BenchmarkPeek(b *testing.B) {
+	b.StopTimer()
+	b.ReportAllocs()
+	limiter := NewDefaultLimiter()
+	b.StartTimer()
+	for n := 0; n < b.N; n++ {
+		limiter.Peek(dummyTicker)
+	}
+}
+
+func BenchmarkConcurrentCheck(b *testing.B) {
+	b.StopTimer()
+	b.ReportAllocs()
+	limiter := NewDefaultLimiter()
+	b.StartTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			limiter.Check(dummyTicker)
+		}
+	})
+}
+
+func BenchmarkConcurrentSetAndCheckHardcore(b *testing.B) {
+	b.StopTimer()
+	b.ReportAllocs()
+	limiter := NewHardcoreLimiter(25, 25)
+	b.StartTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			limiter.Check(dummyTicker)
+		}
+	})
+}
+
+func BenchmarkConcurrentSetAndCheckStrict(b *testing.B) {
+	b.StopTimer()
+	b.ReportAllocs()
+	limiter := NewDefaultStrictLimiter()
+	b.StartTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			limiter.Check(dummyTicker)
+		}
+	})
+}
+
+func BenchmarkConcurrentPeek(b *testing.B) {
+	b.StopTimer()
+	b.ReportAllocs()
+	limiter := NewDefaultLimiter()
+	b.StartTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			limiter.Peek(dummyTicker)
+		}
+	})
+}
