@@ -164,7 +164,7 @@ func (q *Limiter) Check(from Identity) (limited bool) {
 func (q *Limiter) Peek(from Identity) bool {
 	q.Patrons.DeleteExpired()
 	if ct, ok := q.Patrons.Get(from.UniqueKey()); ok {
-		count := ct.(int64)
+		count := ct.(*atomic.Int64).Load()
 		if count > q.Ruleset.Burst {
 			return true
 		}
