@@ -560,7 +560,7 @@ func (r reader) Read(p []byte) (int, error) {
 
 func TestMiscellaneousBehaviorForCoverage(t *testing.T) {
 	sp, err := NewSpeedometer(writeCloser{})
-	if err != nil {
+	if err != nil || sp == nil {
 		t.Fatal("unexpected error")
 	}
 	if act, actErr := sp.chkIOType(ioReader); act != nil || actErr == nil {
@@ -576,7 +576,7 @@ func TestMiscellaneousBehaviorForCoverage(t *testing.T) {
 		t.Fatal("unexpected nil closer")
 	}
 	sp, err = NewReadingSpeedometer(reader{})
-	if err != nil {
+	if err != nil || sp == nil {
 		t.Fatal("unexpected error")
 	}
 	if act, actErr := sp.chkIOType(ioWriter); act != nil || actErr == nil {
@@ -592,7 +592,7 @@ func TestMiscellaneousBehaviorForCoverage(t *testing.T) {
 		t.Fatal("unexpected closer")
 	}
 	sp, err = NewReadingSpeedometer(readCloser{})
-	if err != nil {
+	if err != nil || sp == nil {
 		t.Fatal("unexpected error")
 	}
 	if sp.w != nil {
