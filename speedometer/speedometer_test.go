@@ -479,6 +479,8 @@ func (bw badWrites) Write(_ []byte) (int, error) {
 	return 0, io.EOF
 }
 
+func (bw badWrites) Close() error { return io.ErrNoProgress }
+
 func TestImprobableEdgeCasesForCoverage(t *testing.T) {
 	t.Parallel()
 	sp, _ := NewSpeedometer(io.Discard)
@@ -499,8 +501,8 @@ func TestImprobableEdgeCasesForCoverage(t *testing.T) {
 	if _, e := sp.Write([]byte("yeet")); !errors.Is(e, io.EOF) {
 		t.Errorf("wrong error from underlying writer err passdown: %v", e)
 	}
-	if e := sp.Close(); e != nil {
-		t.Fatal("close err not nil")
+	if e := sp.Close(); e == nil {
+		t.Fatal("should have received error when closing with bad writer")
 	}
 	if e := sp.Close(); !errors.Is(e, io.ErrClosedPipe) {
 		t.Errorf("wrong error from already closed speedo: %v", e)
@@ -557,6 +559,9 @@ func (r reader) Read(p []byte) (int, error) {
 
 func TestMiscellaneousBehaviorForCoverage(t *testing.T) {
 	sp, err := NewSpeedometer(writeCloser{})
+	if act, actErr := sp.chkIOType(ioReader); act != nil || actErr == nil {
+		t.Fatal("should have received error when checking for reader on writecloser")
+	}
 	if err != nil {
 		t.Fatal("unexpected error")
 	}
@@ -570,6 +575,9 @@ func TestMiscellaneousBehaviorForCoverage(t *testing.T) {
 		t.Fatal("unexpected nil closer")
 	}
 	sp, err = NewReadingSpeedometer(reader{})
+	if act, actErr := sp.chkIOType(ioWriter); act != nil || actErr == nil {
+		t.Fatal("should have received error when checking for writer on readcloser")
+	}
 	if err != nil {
 		t.Fatal("unexpected error")
 	}
@@ -595,6 +603,16 @@ func TestMiscellaneousBehaviorForCoverage(t *testing.T) {
 	if sp.c == nil {
 		t.Fatal("unexpected nil closer")
 	}
+}
+
+func TestMustPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic")
+		}
+	}()
+	sp, _ := NewSpeedometer(writeCloser{})
+	_, _ = sp.chkIOType(ioType(55))
 }
 
 func measureRate(t *testing.T, received int64, duration time.Duration) float64 {
