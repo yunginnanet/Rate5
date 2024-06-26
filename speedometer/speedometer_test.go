@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,11 @@ type testWriter struct {
 }
 
 func (w *testWriter) Write(p []byte) (n int, err error) {
+	atomic.AddInt64(&w.total, int64(len(p)))
+	return len(p), nil
+}
+
+func (w *testWriter) Read(p []byte) (n int, err error) {
 	atomic.AddInt64(&w.total, int64(len(p)))
 	return len(p), nil
 }
@@ -41,6 +47,31 @@ func writeStuff(t *testing.T, target io.Writer, count int) error {
 	}
 	for i := 0; i < count; i++ {
 		if err := write(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readStuff(t *testing.T, target io.Reader, count int) error {
+	t.Helper()
+	read := func() error {
+		_, err := target.Read(make([]byte, 1))
+		if err != nil {
+			return fmt.Errorf("error reading: %w", err)
+		}
+		return nil
+	}
+
+	if count < 0 {
+		var err error
+		for err = read(); err == nil; err = read() {
+			time.Sleep(5 * time.Millisecond)
+		}
+		return err
+	}
+	for i := 0; i < count; i++ {
+		if err := read(); err != nil {
 			return err
 		}
 	}
@@ -78,6 +109,58 @@ func Test_Speedometer(t *testing.T) {
 	)
 
 	t.Run("EarlyClose", func(t *testing.T) {
+		t.Parallel()
+		t.Run("Write", func(t *testing.T) {
+			var (
+				err error
+				cnt int
+			)
+			t.Parallel()
+			sp, nerr := NewSpeedometer(&testWriter{t: t})
+			if nerr != nil {
+				t.Errorf("unexpected error: %v", nerr)
+			}
+			go func() {
+				errChan <- writeStuff(t, sp, -1)
+			}()
+			time.Sleep(1 * time.Second)
+			if closeErr := sp.Close(); closeErr != nil {
+				t.Errorf("wantErr: want %v, have %v", nil, closeErr)
+			}
+			err = <-errChan
+			if !errors.Is(err, io.ErrClosedPipe) {
+				t.Errorf("wantErr: want %v, have %v", io.ErrClosedPipe, err)
+			}
+			cnt, err = sp.Write([]byte("a"))
+			isIt(results{err: io.ErrClosedPipe, written: 0}, results{err: err, written: cnt})
+		})
+		t.Run("Read", func(t *testing.T) {
+			var (
+				err error
+				cnt int
+			)
+			t.Parallel()
+			sp, nerr := NewSpeedometer(&testWriter{t: t})
+			if nerr != nil {
+				t.Errorf("unexpected error: %v", nerr)
+			}
+			go func() {
+				errChan <- readStuff(t, sp.r, -1)
+			}()
+			time.Sleep(1 * time.Second)
+			if closeErr := sp.Close(); closeErr != nil {
+				t.Errorf("wantErr: want %v, have %v", nil, closeErr)
+			}
+			err = <-errChan
+			if !errors.Is(err, io.ErrClosedPipe) {
+				t.Errorf("wantErr: want %v, have %v", io.ErrClosedPipe, err)
+			}
+			cnt, err = sp.Read(make([]byte, 1))
+			isIt(results{err: io.ErrClosedPipe, written: 0}, results{err: err, written: cnt})
+		})
+	})
+
+	t.Run("EarlyCloseReader", func(t *testing.T) {
 		var (
 			err error
 			cnt int
@@ -88,7 +171,7 @@ func Test_Speedometer(t *testing.T) {
 			t.Errorf("unexpected error: %v", nerr)
 		}
 		go func() {
-			errChan <- writeStuff(t, sp, -1)
+			errChan <- readStuff(t, sp, -1)
 		}()
 		time.Sleep(1 * time.Second)
 		if closeErr := sp.Close(); closeErr != nil {
@@ -98,7 +181,7 @@ func Test_Speedometer(t *testing.T) {
 		if !errors.Is(err, io.ErrClosedPipe) {
 			t.Errorf("wantErr: want %v, have %v", io.ErrClosedPipe, err)
 		}
-		cnt, err = sp.Write([]byte("a"))
+		cnt, err = sp.Read(make([]byte, 1))
 		isIt(results{err: io.ErrClosedPipe, written: 0}, results{err: err, written: cnt})
 	})
 
@@ -294,7 +377,7 @@ func Test_Speedometer(t *testing.T) {
 		}
 		defer func(server net.Listener) {
 			if cErr := server.Close(); cErr != nil {
-				t.Errorf("Failed to close server: %v", err)
+				t.Errorf("failed to close server: %v", cErr)
 			}
 		}(server)
 
@@ -304,14 +387,15 @@ func Test_Speedometer(t *testing.T) {
 				aErr error
 			)
 			if conn, aErr = server.Accept(); aErr != nil {
-				t.Errorf("Failed to accept connection: %v", err)
+				t.Errorf("failed to accept connection: %v", aErr)
 			}
 
-			t.Logf("Accepted connection from %s", conn.RemoteAddr().String())
+			t.Logf("accepted connection from %s", conn.RemoteAddr().String())
 
 			defer func(conn net.Conn) {
-				if cErr := conn.Close(); cErr != nil {
-					t.Errorf("Failed to close connection: %v", err)
+				if cErr := conn.Close(); cErr != nil &&
+					!strings.Contains(cErr.Error(), "use of closed network connection") {
+					t.Errorf("failed to close connection: %v", cErr)
 				}
 			}(conn)
 
@@ -327,7 +411,7 @@ func Test_Speedometer(t *testing.T) {
 				sErr        error
 			)
 			if speedometer, sErr = NewCappedLimitedSpeedometer(conn, speedLimit, 4096); sErr != nil {
-				t.Errorf("Failed to create speedometer: %v", sErr)
+				t.Errorf("failed to create speedometer: %v", sErr)
 			}
 
 			buf := make([]byte, 1024)
@@ -344,11 +428,11 @@ func Test_Speedometer(t *testing.T) {
 				case errors.Is(wErr, io.EOF), errors.Is(wErr, ErrLimitReached):
 					return
 				case wErr != nil:
-					t.Errorf("Failed to write: %v", wErr)
+					t.Errorf("failed to write: %v", wErr)
 				case n != len(buf):
-					t.Errorf("Failed to write all bytes: %d", n)
+					t.Errorf("failed to write all bytes: %d", n)
 				default:
-					t.Logf("Wrote %d bytes (rate: %v/bps)", n, speedometer.Rate())
+					t.Logf("wrote %d bytes (rate: %v/bps)", n, speedometer.Rate())
 				}
 			}
 		}()
@@ -359,12 +443,12 @@ func Test_Speedometer(t *testing.T) {
 		)
 
 		if client, aErr = net.Dial("tcp", "localhost:8080"); aErr != nil {
-			t.Fatalf("Failed to connect to server: %v", err)
+			t.Fatalf("failed to connect to server: %v", err)
 		}
 
 		defer func(client net.Conn) {
 			if clErr := client.Close(); clErr != nil {
-				t.Errorf("Failed to close client: %v", err)
+				t.Errorf("failed to close client: %v", err)
 			}
 		}(client)
 
@@ -372,18 +456,18 @@ func Test_Speedometer(t *testing.T) {
 		startTime := time.Now()
 		n, cpErr := io.Copy(buf, client)
 		if cpErr != nil {
-			t.Errorf("Failed to copy: %v", cpErr)
+			t.Errorf("failed to copy: %v", cpErr)
 		}
 
 		duration := time.Since(startTime)
 		if buf.Len() == 0 || n == 0 {
-			t.Fatalf("No data received")
+			t.Fatalf("nNo data received")
 		}
 
 		rate := measureRate(t, n, duration)
 
 		if rate > 512.0 {
-			t.Fatalf("Rate exceeded: got %f, expected <= 100.0", rate)
+			t.Fatalf("rate exceeded: got %f, expected <= 100.0", rate)
 		}
 	})
 }
@@ -443,7 +527,74 @@ func TestImprobableEdgeCasesForCoverage(t *testing.T) {
 	if sp.speedLimit.Delay != time.Duration(100)*time.Millisecond {
 		t.Fatal("speed limit regularization failed")
 	}
+}
 
+type writeCloser struct{}
+
+func (wc writeCloser) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (wc writeCloser) Close() error {
+	return nil
+}
+
+type readCloser struct{}
+
+func (rc readCloser) Read(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (rc readCloser) Close() error {
+	return nil
+}
+
+type reader struct{}
+
+func (r reader) Read(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func TestMiscellaneousBehaviorForCoverage(t *testing.T) {
+	sp, err := NewSpeedometer(writeCloser{})
+	if err != nil {
+		t.Fatal("unexpected error")
+	}
+	if sp.w == nil {
+		t.Fatal("unexpected nil writer")
+	}
+	if sp.r != nil {
+		t.Fatal("unexpected reader")
+	}
+	if sp.c == nil {
+		t.Fatal("unexpected nil closer")
+	}
+	sp, err = NewReadingSpeedometer(reader{})
+	if err != nil {
+		t.Fatal("unexpected error")
+	}
+	if sp.w != nil {
+		t.Fatal("unexpected writer")
+	}
+	if sp.r == nil {
+		t.Fatal("unexpected nil reader")
+	}
+	if sp.c != nil {
+		t.Fatal("unexpected closer")
+	}
+	sp, err = NewReadingSpeedometer(readCloser{})
+	if err != nil {
+		t.Fatal("unexpected error")
+	}
+	if sp.w != nil {
+		t.Fatal("unexpected writer")
+	}
+	if sp.r == nil {
+		t.Fatal("unexpected nil reader")
+	}
+	if sp.c == nil {
+		t.Fatal("unexpected nil closer")
+	}
 }
 
 func measureRate(t *testing.T, received int64, duration time.Duration) float64 {

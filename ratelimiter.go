@@ -9,6 +9,29 @@ import (
 	"github.com/patrickmn/go-cache"
 )
 
+const (
+	strictPrefix   = "strict"
+	hardcorePrefix = "hardcore"
+)
+
+var _counters = &sync.Pool{
+	New: func() interface{} {
+		i := &atomic.Int64{}
+		i.Store(0)
+		return i
+	},
+}
+
+func getCounter() *atomic.Int64 {
+	got := _counters.Get().(*atomic.Int64)
+	got.Store(0)
+	return got
+}
+
+func putCounter(i *atomic.Int64) {
+	_counters.Put(i)
+}
+
 /*NewDefaultLimiter returns a ratelimiter with default settings without Strict mode.
  * Default window: 25 seconds
  * Default burst: 25 requests */
@@ -70,28 +93,40 @@ func NewHardcoreLimiter(window int, burst int) *Limiter {
 	return l
 }
 
+// ResetItem removes an Identity from the limiter's cache.
+// This effectively resets the rate limit for the Identity.
 func (q *Limiter) ResetItem(from Identity) {
 	q.Patrons.Delete(from.UniqueKey())
-	q.debugPrintf("ratelimit for %s has been reset", from.UniqueKey())
+	q.debugPrintf(msgRateLimitedRst, from.UniqueKey())
+}
+
+func (q *Limiter) onEvict(src string, count interface{}) {
+	q.debugPrintf(msgRateLimitExpired, src, count)
+	putCounter(count.(*atomic.Int64))
+
 }
 
 func newLimiter(policy Policy) *Limiter {
 	window := time.Duration(policy.Window) * time.Second
-	return &Limiter{
+	q := &Limiter{
 		Ruleset:    policy,
 		Patrons:    cache.New(window, time.Duration(policy.Window)*time.Second),
-		known:      make(map[interface{}]*int64),
+		known:      make(map[interface{}]*atomic.Int64),
 		RWMutex:    &sync.RWMutex{},
 		debugMutex: &sync.RWMutex{},
 		debug:      DebugDisabled,
 	}
+	q.Patrons.OnEvicted(q.onEvict)
+	return q
 }
 
-func intPtr(i int64) *int64 {
-	return &i
+func intPtr(i int64) *atomic.Int64 {
+	a := getCounter()
+	a.Store(i)
+	return a
 }
 
-func (q *Limiter) getHitsPtr(src string) *int64 {
+func (q *Limiter) getHitsPtr(src string) *atomic.Int64 {
 	q.RLock()
 	if _, ok := q.known[src]; ok {
 		oldPtr := q.known[src]
@@ -100,29 +135,29 @@ func (q *Limiter) getHitsPtr(src string) *int64 {
 	}
 	q.RUnlock()
 	q.Lock()
-	newPtr := intPtr(0)
+	newPtr := getCounter()
 	q.known[src] = newPtr
 	q.Unlock()
 	return newPtr
 }
 
-func (q *Limiter) strictLogic(src string, count int64) {
+func (q *Limiter) strictLogic(src string, count *atomic.Int64) {
 	knownHits := q.getHitsPtr(src)
-	atomic.AddInt64(knownHits, 1)
+	knownHits.Add(1)
 	var extwindow int64
-	prefix := "hardcore"
+	prefix := hardcorePrefix
 	switch {
 	case q.Ruleset.Hardcore && q.Ruleset.Window > 1:
-		extwindow = atomic.LoadInt64(knownHits) * q.Ruleset.Window
+		extwindow = knownHits.Load() * q.Ruleset.Window
 	case q.Ruleset.Hardcore && q.Ruleset.Window <= 1:
-		extwindow = atomic.LoadInt64(knownHits) * 2
+		extwindow = knownHits.Load() * 2
 	case !q.Ruleset.Hardcore:
-		prefix = "strict"
-		extwindow = atomic.LoadInt64(knownHits) + q.Ruleset.Window
+		prefix = strictPrefix
+		extwindow = knownHits.Load() + q.Ruleset.Window
 	}
 	exttime := time.Duration(extwindow) * time.Second
 	_ = q.Patrons.Replace(src, count, exttime)
-	q.debugPrintf("%s ratelimit for %s: last count %d. time: %s", prefix, src, count, exttime)
+	q.debugPrintf(msgRateLimitStrict, prefix, src, count.Load(), exttime)
 }
 
 func (q *Limiter) CheckStringer(from fmt.Stringer) bool {
@@ -133,33 +168,32 @@ func (q *Limiter) CheckStringer(from fmt.Stringer) bool {
 // Check checks and increments an Identities UniqueKey() output against a list of cached strings to determine and raise it's ratelimitting status.
 func (q *Limiter) Check(from Identity) (limited bool) {
 	var count int64
-	var err error
-	src := from.UniqueKey()
-	count, err = q.Patrons.IncrementInt64(src, 1)
-	if err != nil {
-		// IncrementInt64 should only error if the value is not an int64, so we can assume it's a new key.
-		q.debugPrintf("ratelimit %s (new) ", src)
+	aval, ok := q.Patrons.Get(from.UniqueKey())
+	switch {
+	case !ok:
+		q.debugPrintf(msgRateLimitedNew, from.UniqueKey())
+		aval = intPtr(1)
 		// We can't reproduce this throwing an error, we can only assume that the key is new.
-		_ = q.Patrons.Add(src, int64(1), time.Duration(q.Ruleset.Window)*time.Second)
+		_ = q.Patrons.Add(from.UniqueKey(), aval, time.Duration(q.Ruleset.Window)*time.Second)
 		return false
-	}
-	if count < q.Ruleset.Burst {
-		return false
+	case aval != nil:
+		count = aval.(*atomic.Int64).Add(1)
+		if count < q.Ruleset.Burst {
+			return false
+		}
 	}
 	if q.Ruleset.Strict {
-		q.strictLogic(src, count)
-	} else {
-		q.debugPrintf("ratelimit %s: last count %d. time: %s",
-			src, count, time.Duration(q.Ruleset.Window)*time.Second)
+		q.strictLogic(from.UniqueKey(), aval.(*atomic.Int64))
+		return true
 	}
+	q.debugPrintf(msgRateLimited, from.UniqueKey(), count, time.Duration(q.Ruleset.Window)*time.Second)
 	return true
 }
 
 // Peek checks an Identities UniqueKey() output against a list of cached strings to determine ratelimitting status without adding to its request count.
 func (q *Limiter) Peek(from Identity) bool {
-	q.Patrons.DeleteExpired()
 	if ct, ok := q.Patrons.Get(from.UniqueKey()); ok {
-		count := ct.(int64)
+		count := ct.(*atomic.Int64).Load()
 		if count > q.Ruleset.Burst {
 			return true
 		}
