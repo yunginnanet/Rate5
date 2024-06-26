@@ -96,6 +96,7 @@ func peekCheckLimited(t *testing.T, limiter *Limiter, shouldbe, stringer bool) {
 
 // this test exists here for coverage, we are simulating the debug channel overflowing and then invoking println().
 func Test_debugPrintf(t *testing.T) {
+	t.Parallel()
 	limiter := NewLimiter(1, 1)
 	_ = limiter.DebugChannel()
 	for n := 0; n < 50; n++ {
@@ -127,6 +128,7 @@ func Test_ResetItem(t *testing.T) {
 }
 
 func Test_NewDefaultLimiter(t *testing.T) {
+	t.Parallel()
 	limiter := NewDefaultLimiter()
 	limiter.Check(dummyTicker)
 	peekCheckLimited(t, limiter, false, false)
@@ -137,6 +139,7 @@ func Test_NewDefaultLimiter(t *testing.T) {
 }
 
 func Test_CheckAndPeekStringer(t *testing.T) {
+	t.Parallel()
 	limiter := NewDefaultLimiter()
 	limiter.CheckStringer(dummyTicker)
 	peekCheckLimited(t, limiter, false, true)
@@ -147,6 +150,7 @@ func Test_CheckAndPeekStringer(t *testing.T) {
 }
 
 func Test_NewLimiter(t *testing.T) {
+	t.Parallel()
 	limiter := NewLimiter(5, 1)
 	limiter.Check(dummyTicker)
 	peekCheckLimited(t, limiter, false, false)
@@ -155,6 +159,7 @@ func Test_NewLimiter(t *testing.T) {
 }
 
 func Test_NewDefaultStrictLimiter(t *testing.T) {
+	t.Parallel()
 	limiter := NewDefaultStrictLimiter()
 	// ctx, cancel := context.WithCancel(context.Background())
 	// go watchDebug(ctx, limiter, t)
@@ -170,6 +175,7 @@ func Test_NewDefaultStrictLimiter(t *testing.T) {
 }
 
 func Test_NewStrictLimiter(t *testing.T) {
+	t.Parallel()
 	limiter := NewStrictLimiter(5, 1)
 	// ctx, cancel := context.WithCancel(context.Background())
 	// go watchDebug(ctx, limiter, t)
@@ -196,6 +202,7 @@ func Test_NewStrictLimiter(t *testing.T) {
 }
 
 func Test_NewHardcoreLimiter(t *testing.T) {
+	t.Parallel()
 	limiter := NewHardcoreLimiter(1, 5)
 	ctx, cancel := context.WithCancel(context.Background())
 	go watchDebug(ctx, limiter, t)
@@ -324,16 +331,19 @@ testloop:
 }
 
 func Test_ConcurrentShouldNotLimit(t *testing.T) {
+	t.Parallel()
 	concurrentTest(t, 50, 20, 20, false)
 	concurrentTest(t, 50, 50, 50, false)
 }
 
 func Test_ConcurrentShouldLimit(t *testing.T) {
+	t.Parallel()
 	concurrentTest(t, 50, 21, 20, true)
 	concurrentTest(t, 50, 51, 50, true)
 }
 
 func Test_debugChannelOverflow(t *testing.T) {
+	t.Parallel()
 	limiter := NewDefaultLimiter()
 	_ = limiter.DebugChannel()
 	for n := 0; n != 78; n++ {
@@ -345,6 +355,19 @@ func Test_debugChannelOverflow(t *testing.T) {
 	limiter.Check(dummyTicker)
 	if limiter.debugLost == 0 {
 		t.Fatalf("debug channel did not overflow")
+	}
+}
+
+func TestDebugPrintfTypeAssertion(t *testing.T) {
+	t.Parallel()
+	limiter := NewDefaultLimiter()
+	limiter.SetDebug(true)
+	asdf := new(atomic.Int64)
+	asdf.Store(5)
+	limiter.debugChannel = make(chan string, 1)
+	limiter.debugPrintf("test %d %d", 1, asdf)
+	if <-limiter.debugChannel != "test 1 5" {
+		t.Fatalf("failed to type assert atomic.Int64")
 	}
 }
 
