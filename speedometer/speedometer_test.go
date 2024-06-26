@@ -78,31 +78,32 @@ func readStuff(t *testing.T, target io.Reader, count int) error {
 	return nil
 }
 
+type results struct {
+	total   int64
+	written int
+	rate    float64
+	err     error
+}
+
+func isIt(want, have results, t *testing.T) {
+	t.Helper()
+	if have.total != want.total {
+		t.Errorf("total: want %d, have %d", want.total, have.total)
+	}
+	if have.written != want.written {
+		t.Errorf("written: want %d, have %d", want.written, have.written)
+	}
+	if have.rate != want.rate {
+		t.Errorf("rate: want %f, have %f", want.rate, have.rate)
+	}
+	if !errors.Is(have.err, want.err) {
+		t.Errorf("wantErr: want %v, have %v", want.err, have.err)
+	}
+}
+
 //nolint:funlen
 func Test_Speedometer(t *testing.T) {
 	t.Parallel()
-	type results struct {
-		total   int64
-		written int
-		rate    float64
-		err     error
-	}
-
-	isIt := func(want, have results) {
-		t.Helper()
-		if have.total != want.total {
-			t.Errorf("total: want %d, have %d", want.total, have.total)
-		}
-		if have.written != want.written {
-			t.Errorf("written: want %d, have %d", want.written, have.written)
-		}
-		if have.rate != want.rate {
-			t.Errorf("rate: want %f, have %f", want.rate, have.rate)
-		}
-		if !errors.Is(have.err, want.err) {
-			t.Errorf("wantErr: want %v, have %v", want.err, have.err)
-		}
-	}
 
 	var (
 		errChan = make(chan error, 10)
@@ -132,7 +133,7 @@ func Test_Speedometer(t *testing.T) {
 				t.Errorf("wantErr: want %v, have %v", io.ErrClosedPipe, err)
 			}
 			cnt, err = sp.Write([]byte("a"))
-			isIt(results{err: io.ErrClosedPipe, written: 0}, results{err: err, written: cnt})
+			isIt(results{err: io.ErrClosedPipe, written: 0}, results{err: err, written: cnt}, t)
 		})
 		t.Run("Read", func(t *testing.T) {
 			var (
@@ -156,7 +157,7 @@ func Test_Speedometer(t *testing.T) {
 				t.Errorf("wantErr: want %v, have %v", io.ErrClosedPipe, err)
 			}
 			cnt, err = sp.Read(make([]byte, 1))
-			isIt(results{err: io.ErrClosedPipe, written: 0}, results{err: err, written: cnt})
+			isIt(results{err: io.ErrClosedPipe, written: 0}, results{err: err, written: cnt}, t)
 		})
 	})
 
@@ -182,7 +183,7 @@ func Test_Speedometer(t *testing.T) {
 			t.Errorf("wantErr: want %v, have %v", io.ErrClosedPipe, err)
 		}
 		cnt, err = sp.Read(make([]byte, 1))
-		isIt(results{err: io.ErrClosedPipe, written: 0}, results{err: err, written: cnt})
+		isIt(results{err: io.ErrClosedPipe, written: 0}, results{err: err, written: cnt}, t)
 	})
 
 	t.Run("Basic", func(t *testing.T) {
@@ -196,13 +197,13 @@ func Test_Speedometer(t *testing.T) {
 			t.Errorf("unexpected error: %v", nerr)
 		}
 		cnt, err = sp.Write([]byte("a"))
-		isIt(results{err: nil, written: 1, total: 1}, results{err: err, written: cnt, total: sp.Total()})
+		isIt(results{err: nil, written: 1, total: 1}, results{err: err, written: cnt, total: sp.Total()}, t)
 		cnt, err = sp.Write([]byte("aa"))
-		isIt(results{err: nil, written: 2, total: 3}, results{err: err, written: cnt, total: sp.Total()})
+		isIt(results{err: nil, written: 2, total: 3}, results{err: err, written: cnt, total: sp.Total()}, t)
 		cnt, err = sp.Write([]byte("a"))
-		isIt(results{err: nil, written: 1, total: 4}, results{err: err, written: cnt, total: sp.Total()})
+		isIt(results{err: nil, written: 1, total: 4}, results{err: err, written: cnt, total: sp.Total()}, t)
 		cnt, err = sp.Write([]byte("a"))
-		isIt(results{err: nil, written: 1, total: 5}, results{err: err, written: cnt, total: sp.Total()})
+		isIt(results{err: nil, written: 1, total: 5}, results{err: err, written: cnt, total: sp.Total()}, t)
 	})
 
 	t.Run("ConcurrentWrites", func(t *testing.T) {
@@ -231,7 +232,7 @@ func Test_Speedometer(t *testing.T) {
 		}
 		wg.Wait()
 		isIt(results{err: nil, written: 100, total: 100},
-			results{err: err, written: int(atomic.LoadInt64(&count)), total: sp.Total()})
+			results{err: err, written: int(atomic.LoadInt64(&count)), total: sp.Total()}, t)
 	})
 
 	t.Run("GottaGoFast", func(t *testing.T) {
