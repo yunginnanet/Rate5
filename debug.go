@@ -5,9 +5,23 @@ import (
 	"sync/atomic"
 )
 
+const (
+	msgRateLimitExpired = "ratelimit (expired): %s | last count [%d]"
+	msgDebugEnabled     = "rate5 debug enabled"
+	msgRateLimitedRst   = "ratelimit for %s has been reset"
+	msgRateLimitedNew   = "ratelimit %s (new) "
+	msgRateLimited      = "ratelimit %s: last count %d. time: %s"
+	msgRateLimitStrict  = "%s ratelimit for %s: last count %d. time: %s"
+)
+
 func (q *Limiter) debugPrintf(format string, a ...interface{}) {
 	if atomic.CompareAndSwapUint32(&q.debug, DebugDisabled, DebugDisabled) {
 		return
+	}
+	if len(a) == 2 {
+		if _, ok := a[1].(*atomic.Int64); ok {
+			a[1] = a[1].(*atomic.Int64).Load()
+		}
 	}
 	msg := fmt.Sprintf(format, a...)
 	select {
@@ -21,7 +35,7 @@ func (q *Limiter) debugPrintf(format string, a ...interface{}) {
 
 func (q *Limiter) setDebugEvict() {
 	q.Patrons.OnEvicted(func(src string, count interface{}) {
-		q.debugPrintf("ratelimit (expired): %s | last count [%d]", src, count)
+		q.debugPrintf(msgRateLimitExpired, src, count.(*atomic.Int64).Load())
 	})
 }
 
@@ -29,7 +43,7 @@ func (q *Limiter) SetDebug(on bool) {
 	switch on {
 	case true:
 		if atomic.CompareAndSwapUint32(&q.debug, DebugDisabled, DebugEnabled) {
-			q.debugPrintf("rate5 debug enabled")
+			q.debugPrintf(msgDebugEnabled)
 		}
 	case false:
 		atomic.CompareAndSwapUint32(&q.debug, DebugEnabled, DebugDisabled)

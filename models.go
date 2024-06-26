@@ -3,6 +3,7 @@ package rate5
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/patrickmn/go-cache"
 )
@@ -46,7 +47,7 @@ type Limiter struct {
 	debug        uint32
 	debugChannel chan string
 	debugLost    int64
-	known        map[interface{}]*int64
+	known        map[interface{}]*atomic.Int64
 	debugMutex   *sync.RWMutex
 	*sync.RWMutex
 }
