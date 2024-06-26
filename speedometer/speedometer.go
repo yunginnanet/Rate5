@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,6 +26,8 @@ type Speedometer struct {
 	speedLimit *SpeedLimit
 	internal   atomics
 	w          io.Writer
+	r          io.Reader
+	c          io.Closer
 }
 
 type atomics struct {
@@ -87,10 +90,7 @@ func regulateSpeedLimit(speedLimit *SpeedLimit) (*SpeedLimit, error) {
 	return speedLimit, nil
 }
 
-func newSpeedometer(w io.Writer, speedLimit *SpeedLimit, ceiling int64) (*Speedometer, error) {
-	if w == nil {
-		return nil, errors.New("writer cannot be nil")
-	}
+func newSpeedometer(target any, speedLimit *SpeedLimit, ceiling int64) (*Speedometer, error) {
 	var err error
 	if speedLimit != nil {
 		if speedLimit, err = regulateSpeedLimit(speedLimit); err != nil {
@@ -98,18 +98,45 @@ func newSpeedometer(w io.Writer, speedLimit *SpeedLimit, ceiling int64) (*Speedo
 		}
 	}
 
-	return &Speedometer{
-		w:          w,
+	spd := &Speedometer{
 		ceiling:    ceiling,
 		speedLimit: speedLimit,
 		internal:   newAtomics(),
-	}, nil
+	}
+
+	switch t := target.(type) {
+	case io.ReadWriteCloser:
+		spd.w = t
+		spd.r = t
+		spd.c = t
+	case io.ReadWriter:
+		spd.w = t
+		spd.r = t
+	case io.WriteCloser:
+		spd.w = t
+		spd.c = t
+	case io.ReadCloser:
+		spd.r = t
+		spd.c = t
+	case io.Writer:
+		spd.w = t
+	case io.Reader:
+		spd.r = t
+	default:
+		return nil, errors.New("invalid target")
+	}
+
+	return spd, nil
 }
 
 // NewSpeedometer creates a new Speedometer that wraps the given io.Writer.
 // It will not limit the rate at which data is written to the underlying writer, it only measures it.
 func NewSpeedometer(w io.Writer) (*Speedometer, error) {
 	return newSpeedometer(w, nil, -1)
+}
+
+func NewReadingSpeedometer(r io.Reader) (*Speedometer, error) {
+	return newSpeedometer(r, nil, -1)
 }
 
 // NewLimitedSpeedometer creates a new Speedometer that wraps the given io.Writer.
@@ -160,14 +187,23 @@ func (s *Speedometer) Close() error {
 	if s.internal.closed.Load() {
 		return io.ErrClosedPipe
 	}
+
+	var err error
+
 	s.internal.stop.Do(func() {
 		s.internal.closed.Store(true)
 		stopped := time.Now()
 		birth := s.internal.birth.Load()
 		duration := stopped.Sub(*birth)
 		s.internal.duration.Store(&duration)
+		if s.c != nil {
+			if cErr := s.c.Close(); cErr != nil && !errors.Is(cErr, net.ErrClosed) {
+				err = cErr
+			}
+		}
 	})
-	return nil
+
+	return err
 }
 
 // Rate returns the bytes per second rate at which data is being written to the underlying writer.
@@ -205,11 +241,48 @@ func (s *Speedometer) slowDown() error {
 	return nil
 }
 
-// Write writes p to the underlying writer, following all defined speed limits.
-func (s *Speedometer) Write(p []byte) (n int, err error) {
+var (
+	ErrWriteOnly = errors.New("not a reader")
+	ErrReadOnly  = errors.New("not a writer")
+)
+
+type ioType int
+
+const (
+	ioWriter ioType = iota
+	ioReader
+)
+
+type actor func(p []byte) (n int, err error)
+
+func (s *Speedometer) chkIOType(t ioType) (actor, error) {
 	if s.internal.closed.Load() {
-		return 0, io.ErrClosedPipe
+		return nil, io.ErrClosedPipe
 	}
+
+	switch t {
+	case ioWriter:
+		if s.w == nil {
+			return nil, ErrReadOnly
+		}
+		return s.w.Write, nil
+	case ioReader:
+		if s.r == nil {
+			return nil, ErrWriteOnly
+		}
+		return s.r.Read, nil
+	default:
+		panic("invalid ioType")
+	}
+
+}
+
+func (s *Speedometer) do(t ioType, p []byte) (n int, err error) {
+	var ioActor actor
+	if ioActor, err = s.chkIOType(t); err != nil {
+		return 0, err
+	}
+
 	s.internal.start.Do(func() {
 		now := time.Now()
 		s.internal.birth.Store(&now)
@@ -217,7 +290,7 @@ func (s *Speedometer) Write(p []byte) (n int, err error) {
 
 	// if no speed limit, just write and record
 	if s.speedLimit == nil {
-		n, err = s.w.Write(p)
+		n, err = ioActor(p)
 		if err != nil {
 			return n, fmt.Errorf("error writing to underlying writer: %w", err)
 		}
@@ -237,8 +310,17 @@ func (s *Speedometer) Write(p []byte) (n int, err error) {
 	_ = s.slowDown()
 
 	var iErr error
-	if n, iErr = s.w.Write(p[:accepted]); iErr != nil {
+	if n, iErr = ioActor(p[:accepted]); iErr != nil {
 		return n, fmt.Errorf("error writing to underlying writer: %w", iErr)
 	}
 	return
+}
+
+// Write writes p to the underlying writer, following all defined speed limits.
+func (s *Speedometer) Write(p []byte) (n int, err error) {
+	return s.do(ioWriter, p)
+}
+
+func (s *Speedometer) Read(p []byte) (n int, err error) {
+	return s.do(ioReader, p)
 }

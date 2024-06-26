@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -95,6 +96,7 @@ func peekCheckLimited(t *testing.T, limiter *Limiter, shouldbe, stringer bool) {
 
 // this test exists here for coverage, we are simulating the debug channel overflowing and then invoking println().
 func Test_debugPrintf(t *testing.T) {
+	t.Parallel()
 	limiter := NewLimiter(1, 1)
 	_ = limiter.DebugChannel()
 	for n := 0; n < 50; n++ {
@@ -126,6 +128,7 @@ func Test_ResetItem(t *testing.T) {
 }
 
 func Test_NewDefaultLimiter(t *testing.T) {
+	t.Parallel()
 	limiter := NewDefaultLimiter()
 	limiter.Check(dummyTicker)
 	peekCheckLimited(t, limiter, false, false)
@@ -136,6 +139,7 @@ func Test_NewDefaultLimiter(t *testing.T) {
 }
 
 func Test_CheckAndPeekStringer(t *testing.T) {
+	t.Parallel()
 	limiter := NewDefaultLimiter()
 	limiter.CheckStringer(dummyTicker)
 	peekCheckLimited(t, limiter, false, true)
@@ -146,6 +150,7 @@ func Test_CheckAndPeekStringer(t *testing.T) {
 }
 
 func Test_NewLimiter(t *testing.T) {
+	t.Parallel()
 	limiter := NewLimiter(5, 1)
 	limiter.Check(dummyTicker)
 	peekCheckLimited(t, limiter, false, false)
@@ -154,9 +159,10 @@ func Test_NewLimiter(t *testing.T) {
 }
 
 func Test_NewDefaultStrictLimiter(t *testing.T) {
+	t.Parallel()
 	limiter := NewDefaultStrictLimiter()
-	ctx, cancel := context.WithCancel(context.Background())
-	go watchDebug(ctx, limiter, t)
+	// ctx, cancel := context.WithCancel(context.Background())
+	// go watchDebug(ctx, limiter, t)
 	time.Sleep(25 * time.Millisecond)
 	for n := 0; n < 25; n++ {
 		limiter.Check(dummyTicker)
@@ -164,14 +170,15 @@ func Test_NewDefaultStrictLimiter(t *testing.T) {
 	peekCheckLimited(t, limiter, false, false)
 	limiter.Check(dummyTicker)
 	peekCheckLimited(t, limiter, true, false)
-	cancel()
+	// cancel()
 	limiter = nil
 }
 
 func Test_NewStrictLimiter(t *testing.T) {
+	t.Parallel()
 	limiter := NewStrictLimiter(5, 1)
-	ctx, cancel := context.WithCancel(context.Background())
-	go watchDebug(ctx, limiter, t)
+	// ctx, cancel := context.WithCancel(context.Background())
+	// go watchDebug(ctx, limiter, t)
 	limiter.Check(dummyTicker)
 	peekCheckLimited(t, limiter, false, false)
 	limiter.Check(dummyTicker)
@@ -190,11 +197,12 @@ func Test_NewStrictLimiter(t *testing.T) {
 	peekCheckLimited(t, limiter, true, false)
 	time.Sleep(8 * time.Second)
 	peekCheckLimited(t, limiter, false, false)
-	cancel()
+	// cancel()
 	limiter = nil
 }
 
 func Test_NewHardcoreLimiter(t *testing.T) {
+	t.Parallel()
 	limiter := NewHardcoreLimiter(1, 5)
 	ctx, cancel := context.WithCancel(context.Background())
 	go watchDebug(ctx, limiter, t)
@@ -305,7 +313,7 @@ testloop:
 		if ci, ok = limiter.Patrons.Get(rp.UniqueKey()); !ok {
 			t.Fatal("randomPatron does not exist in ratelimiter at all!")
 		}
-		ct := ci.(int64)
+		ct := ci.(*atomic.Int64).Load()
 		if limiter.Peek(rp) && !shouldLimit {
 			t.Logf("(%d goroutines running)", runtime.NumGoroutine())
 			// runtime.Breakpoint()
@@ -323,16 +331,19 @@ testloop:
 }
 
 func Test_ConcurrentShouldNotLimit(t *testing.T) {
+	t.Parallel()
 	concurrentTest(t, 50, 20, 20, false)
 	concurrentTest(t, 50, 50, 50, false)
 }
 
 func Test_ConcurrentShouldLimit(t *testing.T) {
+	t.Parallel()
 	concurrentTest(t, 50, 21, 20, true)
 	concurrentTest(t, 50, 51, 50, true)
 }
 
 func Test_debugChannelOverflow(t *testing.T) {
+	t.Parallel()
 	limiter := NewDefaultLimiter()
 	_ = limiter.DebugChannel()
 	for n := 0; n != 78; n++ {
@@ -347,10 +358,23 @@ func Test_debugChannelOverflow(t *testing.T) {
 	}
 }
 
+func TestDebugPrintfTypeAssertion(t *testing.T) {
+	t.Parallel()
+	limiter := NewDefaultLimiter()
+	limiter.SetDebug(true)
+	asdf := new(atomic.Int64)
+	asdf.Store(5)
+	limiter.debugChannel = make(chan string, 1)
+	limiter.debugPrintf("test %d %d", 1, asdf)
+	if <-limiter.debugChannel != "test 1 5" {
+		t.Fatalf("failed to type assert atomic.Int64")
+	}
+}
+
 func BenchmarkCheck(b *testing.B) {
 	b.StopTimer()
-	b.ReportAllocs()
 	limiter := NewDefaultLimiter()
+	b.ReportAllocs()
 	b.StartTimer()
 	for n := 0; n < b.N; n++ {
 		limiter.Check(dummyTicker)
@@ -359,8 +383,8 @@ func BenchmarkCheck(b *testing.B) {
 
 func BenchmarkCheckHardcore(b *testing.B) {
 	b.StopTimer()
-	b.ReportAllocs()
 	limiter := NewHardcoreLimiter(25, 25)
+	b.ReportAllocs()
 	b.StartTimer()
 	for n := 0; n < b.N; n++ {
 		limiter.Check(dummyTicker)
@@ -369,8 +393,8 @@ func BenchmarkCheckHardcore(b *testing.B) {
 
 func BenchmarkCheckStrict(b *testing.B) {
 	b.StopTimer()
-	b.ReportAllocs()
 	limiter := NewStrictLimiter(25, 25)
+	b.ReportAllocs()
 	b.StartTimer()
 	for n := 0; n < b.N; n++ {
 		limiter.Check(dummyTicker)
@@ -379,8 +403,8 @@ func BenchmarkCheckStrict(b *testing.B) {
 
 func BenchmarkCheckStringer(b *testing.B) {
 	b.StopTimer()
-	b.ReportAllocs()
 	limiter := NewDefaultLimiter()
+	b.ReportAllocs()
 	b.StartTimer()
 	for n := 0; n < b.N; n++ {
 		limiter.CheckStringer(dummyTicker)
@@ -389,8 +413,8 @@ func BenchmarkCheckStringer(b *testing.B) {
 
 func BenchmarkPeek(b *testing.B) {
 	b.StopTimer()
-	b.ReportAllocs()
 	limiter := NewDefaultLimiter()
+	b.ReportAllocs()
 	b.StartTimer()
 	for n := 0; n < b.N; n++ {
 		limiter.Peek(dummyTicker)
@@ -399,8 +423,8 @@ func BenchmarkPeek(b *testing.B) {
 
 func BenchmarkConcurrentCheck(b *testing.B) {
 	b.StopTimer()
-	b.ReportAllocs()
 	limiter := NewDefaultLimiter()
+	b.ReportAllocs()
 	b.StartTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -411,8 +435,8 @@ func BenchmarkConcurrentCheck(b *testing.B) {
 
 func BenchmarkConcurrentSetAndCheckHardcore(b *testing.B) {
 	b.StopTimer()
-	b.ReportAllocs()
 	limiter := NewHardcoreLimiter(25, 25)
+	b.ReportAllocs()
 	b.StartTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -423,8 +447,8 @@ func BenchmarkConcurrentSetAndCheckHardcore(b *testing.B) {
 
 func BenchmarkConcurrentSetAndCheckStrict(b *testing.B) {
 	b.StopTimer()
-	b.ReportAllocs()
 	limiter := NewDefaultStrictLimiter()
+	b.ReportAllocs()
 	b.StartTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -435,8 +459,8 @@ func BenchmarkConcurrentSetAndCheckStrict(b *testing.B) {
 
 func BenchmarkConcurrentPeek(b *testing.B) {
 	b.StopTimer()
-	b.ReportAllocs()
 	limiter := NewDefaultLimiter()
+	b.ReportAllocs()
 	b.StartTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
