@@ -152,6 +152,11 @@ func Test_Speedometer(t *testing.T) {
 			if closeErr := sp.Close(); closeErr != nil {
 				t.Errorf("wantErr: want %v, have %v", nil, closeErr)
 			}
+			t.Run("ZeroRateAfterClose", func(t *testing.T) {
+				if sp.Rate() != 0 {
+					t.Errorf("rate: want %f after 'Close' method, have %f", 0.0, sp.Rate())
+				}
+			})
 			err = <-errChan
 			if !errors.Is(err, io.ErrClosedPipe) {
 				t.Errorf("wantErr: want %v, have %v", io.ErrClosedPipe, err)
