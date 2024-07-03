@@ -209,7 +209,7 @@ func (s *Speedometer) Close() error {
 // Rate returns the bytes per second rate at which data is being written to the underlying writer.
 func (s *Speedometer) Rate() float64 {
 	if s.internal.closed.Load() {
-		return float64(s.Total()) / s.internal.duration.Load().Seconds()
+		return 0
 	}
 	return float64(s.Total()) / time.Since(*s.internal.birth.Load()).Seconds()
 }
